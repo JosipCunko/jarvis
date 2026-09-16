@@ -1,36 +1,62 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# JARVIS Command Center
 
-## Getting Started
+Personal operator dashboard: missions, memory, and a streaming AI core with generative UI. Built with Next.js, Firebase, NextAuth, and Thesys C1.
 
-First, run the development server:
+## What JARVIS can do now
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Talk in the **Talk to JARVIS** bar (or use Quick Commands / sidebar prompts). With a Thesys API key, replies stream in and can render as cards, lists, and timelines instead of a wall of text. Without the key, JARVIS still answers locally with a briefing or recalled notes.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Missions (tasks)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Create a mission with a title, due date, priority, tags, and notes
+- List active work, or filter by open / in progress / done
+- Mark a mission complete (by id or title)
+- Reschedule a due date
+- Get today’s executive briefing: overdue work, due today, and in progress
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The HUD also shows system status, a live intelligence feed (overdue / due soon), and a mission timeline.
 
-## Learn More
+### Memory
 
-To learn more about Next.js, take a look at the following resources:
+- Store a short note JARVIS should remember
+- Recall stored notes (optionally by search)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Header search asks JARVIS to look across missions and memory.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Conversations
 
-## Deploy on Vercel
+- Chat history is saved per operator
+- Reopen past threads from Conversations, or start a new one
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Auth and data
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Sign in with Firebase email/password, or use **demo operator** in development
+- Data lives in Firestore when the Admin SDK is configured
+- Without Admin SDK, demo login uses a local `.data` store so you can explore the UI
+- Demo login seeds sample missions and a memory note
+
+### Google Calendar and Gmail
+
+After you click **Connect Google** in the header, JARVIS can:
+
+- Create calendar events and reminders
+- List upcoming Google Calendar events
+- List and read Gmail
+- Send email, including images pasted or attached in the Talk bar
+
+### HUD shortcuts that already work
+
+- **Tasks** — list active missions
+- **Calendar** — Google Calendar plus mission timeline
+- **Memory** — recall stored notes
+- **Start New Task** / **Open Calendar** / **Run Workflow** / **Executive Briefing**
+- Sign out
+
+## Not live yet
+
+These modules are in the UI but not wired:
+
+- Voice / speech (Talk bar mic, Start Voice Chat)
+- AI Core, Agents, Knowledge Base, Tools & Skills, Workflows as standalone pages
+- Host CPU / RAM / disk monitor
+- Focus mode
