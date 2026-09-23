@@ -8,6 +8,9 @@ import {
   readEmail,
   sendEmail,
 } from "./google-services";
+import { getProviderCredits } from "./credits";
+import { researchWeb } from "./web-research";
+import { resolveTaskAppearance, TASK_COLOR_IDS, TASK_ICON_IDS, taskAppearanceGuide } from "./task-appearance";
 import { formatWhen, parseWhen, startOfToday, endOfToday } from "./time";
 import type { ChatAttachment, FunctionResult, Task } from "@/app/_types/jarvis";
 
@@ -16,6 +19,12 @@ export const AI_FUNCTIONS = [
     name: "get_briefing",
     description:
       "Get today's mission briefing: overdue tasks, due today, and in-progress work.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "get_credits",
+    description:
+      "Read remaining OpenRouter and Thesys credit. Use when the operator asks about balance, credits, spend, or how much is left. Say the spoken field aloud.",
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
@@ -36,7 +45,7 @@ export const AI_FUNCTIONS = [
   },
   {
     name: "create_task",
-    description: "Create a new mission/task for the operator.",
+    description: `Create a new mission/task for the operator. Always choose icon and color from the library so the mission card matches the work. ${taskAppearanceGuide()}`,
     parameters: {
       type: "object",
       properties: {
@@ -45,8 +54,18 @@ export const AI_FUNCTIONS = [
         priority: { type: "string", enum: ["low", "medium", "high"] },
         tags: { type: "array", items: { type: "string" } },
         notes: { type: "string" },
+        icon: {
+          type: "string",
+          enum: [...TASK_ICON_IDS],
+          description: "Icon id from the mission library. Pick the closest match for the work.",
+        },
+        color: {
+          type: "string",
+          enum: [...TASK_COLOR_IDS],
+          description: "Color id from the mission library. Pick an accent that fits the work.",
+        },
       },
-      required: ["title"],
+      required: ["title", "icon", "color"],
     },
   },
   {
@@ -99,7 +118,11 @@ export const AI_FUNCTIONS = [
     parameters: {
       type: "object",
       properties: {
-        days: { type: "number", description: "How many days ahead to look. Default 7." },
+        days: {
+          type: "number",
+          description:
+            "How many days ahead to look, starting today. Use 31 for the next month. Maximum 31.",
+        },
         query: { type: "string", description: "Optional search text." },
       },
       required: [],
@@ -165,6 +188,21 @@ export const AI_FUNCTIONS = [
       required: ["subject"],
     },
   },
+  {
+    name: "research_web",
+    description:
+      "Search the web once and return source titles, urls, and snippets. Use only when the operator asks to research the web, look it up, go on Google, double-check, verify, or fact-check. Croatian: istraži, provjeri na netu, idi na google, jesi siguran. Do not use for missions, calendar, Gmail, memories, or credits.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Short web search query written by you, not the operator's raw sentence.",
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 export type FunctionContext = {
@@ -172,6 +210,7 @@ export type FunctionContext = {
 };
 
 function serializeTask(task: Task) {
+  const look = resolveTaskAppearance(task);
   return {
     id: task.id,
     title: task.title,
@@ -180,6 +219,8 @@ function serializeTask(task: Task) {
     due: task.dueAt ? formatWhen(task.dueAt) : "unscheduled",
     tags: task.tags,
     notes: task.notes ?? "",
+    icon: look.icon,
+    color: look.color,
   };
 }
 
@@ -214,7 +255,10 @@ export async function executeFunctions(
   for (const call of functionCalls) {
     const args = call.arguments ?? {};
     try {
-      if (call.name === "get_briefing") {
+      if (call.name === "get_credits") {
+        const credits = await getProviderCredits();
+        results.push({ name: call.name, result: credits });
+      } else if (call.name === "get_briefing") {
         const snapshot = await store.loadSnapshot(userId);
         const now = Date.now();
         const overdue = snapshot.tasks.filter(
@@ -269,6 +313,8 @@ export async function executeFunctions(
             args.priority === "low" || args.priority === "high" ? args.priority : "medium",
           tags: Array.isArray(args.tags) ? args.tags.map(String) : [],
           notes: typeof args.notes === "string" ? args.notes : undefined,
+          icon: typeof args.icon === "string" ? args.icon : undefined,
+          color: typeof args.color === "string" ? args.color : undefined,
         });
         results.push({ name: call.name, result: { ok: true, task: serializeTask(task) } });
       } else if (call.name === "complete_task") {
@@ -353,6 +399,14 @@ export async function executeFunctions(
           attachments,
         );
         results.push({ name: call.name, result: sent });
+      } else if (call.name === "research_web") {
+        const research = await researchWeb(typeof args.query === "string" ? args.query : "");
+        results.push({
+          name: call.name,
+          result: research.error
+            ? { error: research.error, query: research.query, sources: research.sources }
+            : { query: research.query, sources: research.sources },
+        });
       } else {
         results.push({ name: call.name, result: { error: "Unknown function" } });
       }

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import CommandCenter from "@/app/_components/CommandCenter";
-import { isGoogleConfigured, isThesysConfigured } from "@/app/_lib/config";
+import { isGoogleConfigured, isSpeechCloudConfigured, isThesysConfigured } from "@/app/_lib/config";
 import { getMissionStore } from "@/app/_lib/mission-store";
 import { getSessionUser } from "@/app/_lib/session";
 
@@ -21,6 +21,7 @@ export default async function Home() {
       thesysReady={isThesysConfigured()}
       googleConfigured={isGoogleConfigured()}
       googleEmail={google?.email ?? null}
+      speechCloud={isSpeechCloudConfigured()}
     />
   );
 }

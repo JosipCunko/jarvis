@@ -2,6 +2,7 @@
 
 import { useId, type ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
+import JarvisMark from "@/app/_components/JarvisMark";
 import { cn } from "@/app/_lib/cn";
 
 const CX = 200;

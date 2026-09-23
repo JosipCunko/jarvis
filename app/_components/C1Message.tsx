@@ -23,13 +23,20 @@ const JARVIS_THEME = {
 };
 
 type C1ActionEvent = {
+  type?: string;
   humanFriendlyMessage?: string;
   llmFriendlyMessage?: string;
   params?: {
+    url?: string;
     humanFriendlyMessage?: string;
     llmFriendlyMessage?: string;
   };
 };
+
+function openSource(url: string | undefined) {
+  if (!url || !/^https?:\/\//i.test(url)) return;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
 
 export default function C1Message({
   content,
@@ -59,6 +66,10 @@ export default function C1Message({
           isStreaming={isStreaming}
           onError={() => setFailed(true)}
           onAction={(event: C1ActionEvent) => {
+            if (event.type === "open_url") {
+              openSource(event.params?.url);
+              return;
+            }
             const text =
               event.params?.humanFriendlyMessage ||
               event.humanFriendlyMessage ||

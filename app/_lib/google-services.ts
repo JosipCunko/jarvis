@@ -70,7 +70,7 @@ export async function listCalendarEvents(
   url.searchParams.set("orderBy", "startTime");
   url.searchParams.set("timeMin", timeMin);
   url.searchParams.set("timeMax", timeMax);
-  url.searchParams.set("maxResults", "20");
+  url.searchParams.set("maxResults", "100");
   url.searchParams.set("timeZone", timeZone);
   if (options.query) url.searchParams.set("q", options.query);
   const data = (await googleApi<{ items?: CalendarEvent[] }>(userId, url.toString())) ?? {

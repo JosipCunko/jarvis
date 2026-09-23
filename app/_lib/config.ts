@@ -12,6 +12,10 @@ export function isThesysConfigured() {
   return Boolean(process.env.THESYS_API_KEY);
 }
 
+export function isSpeechCloudConfigured() {
+  return Boolean(process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY);
+}
+
 export function isDemoAuthEnabled() {
   if (process.env.ALLOW_DEMO_LOGIN === "true") return true;
   return (

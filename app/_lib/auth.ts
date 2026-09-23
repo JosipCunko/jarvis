@@ -28,7 +28,7 @@ export const authOptions: NextAuthOptions = {
         if (!credentials?.idToken || !isFirebaseAdminConfigured()) return null;
         try {
           const decoded = await adminAuth.verifyIdToken(credentials.idToken);
-          if (!decoded?.uid) return null;
+          if (!decoded?.uid || !decoded.email_verified) return null;
 
           const existing = await getMissionStore().getUser(decoded.uid);
           const now = Date.now();
@@ -101,11 +101,15 @@ export const authOptions: NextAuthOptions = {
     },
   },
   callbacks: {
-    async jwt({ token, user, account }) {
+    async jwt({ token, user, account, trigger, session }) {
       if (account && user) {
         token.uid = user.id;
         token.provider = account.provider;
         token.createdAt = user.createdAt;
+      }
+      if (trigger === "update") {
+        const name = typeof session?.name === "string" ? session.name.trim() : "";
+        if (name) token.name = name;
       }
       return token;
     },

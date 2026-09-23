@@ -20,6 +20,8 @@ export interface Task {
   dueAt?: number;
   tags: string[];
   notes?: string;
+  icon?: string;
+  color?: string;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
@@ -33,6 +35,8 @@ export interface TaskInput {
   dueAt?: number | string;
   tags?: string[];
   notes?: string;
+  icon?: string;
+  color?: string;
 }
 
 export interface TaskFilter {
@@ -97,10 +101,15 @@ export interface MissionStore {
   listTasks(userId: string, filter?: TaskFilter): Promise<Task[]>;
   upsertTask(userId: string, task: TaskInput): Promise<Task>;
   completeTask(userId: string, id: string): Promise<Task>;
+  deleteTask(userId: string, id: string): Promise<void>;
   rescheduleTask(userId: string, id: string, dueAt: number): Promise<Task>;
   remember(userId: string, text: string): Promise<MemoryNote>;
   recall(userId: string, query?: string): Promise<MemoryNote[]>;
+  listMemories(userId: string): Promise<MemoryNote[]>;
+  forgetMemory(userId: string, id: string): Promise<void>;
   listChats(userId: string): Promise<Pick<ChatThread, "id" | "title" | "updatedAt">[]>;
+  listChatThreads(userId: string): Promise<ChatThread[]>;
+  listAllChatThreads(): Promise<ChatThread[]>;
   getChat(userId: string, id: string): Promise<ChatThread | null>;
   saveChat(
     userId: string,
@@ -108,6 +117,8 @@ export interface MissionStore {
     messages: ChatMessage[],
     title?: string,
   ): Promise<ChatThread>;
+  renameChat(userId: string, id: string, title: string): Promise<ChatThread>;
+  deleteChat(userId: string, id: string): Promise<void>;
   loadSnapshot(userId: string): Promise<MissionSnapshot>;
   ensureSeedData(userId: string): Promise<void>;
   getGoogleAccount(userId: string): Promise<GoogleAccount | null>;

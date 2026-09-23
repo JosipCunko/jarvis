@@ -5,6 +5,7 @@ import path from "path";
 import { differenceInCalendarDays } from "date-fns";
 import { adminDb } from "./admin";
 import { isFirebaseAdminConfigured } from "./config";
+import { resolveTaskAppearance } from "./task-appearance";
 import { parseWhen, startOfToday } from "./time";
 import type {
   AppUser,
@@ -185,6 +186,27 @@ async function setCollectionDoc<K extends CollectionName>(
   await persistMemory();
 }
 
+async function deleteCollectionDoc<K extends CollectionName>(
+  collection: K,
+  userId: string,
+  id: string,
+) {
+  await ensureMemory();
+  if (firestoreEnabled()) {
+    const ref = userCol(userId, collection).doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) return false;
+    await ref.delete();
+    return true;
+  }
+  const bucket = memory()[collection] as Map<string, EntityMap[K]>;
+  const existing = bucket.get(id);
+  if (!existing || existing.userId !== userId) return false;
+  bucket.delete(id);
+  await persistMemory();
+  return true;
+}
+
 class FirestoreMissionStore implements MissionStore {
   async upsertUser(user: AppUser) {
     await ensureMemory();
@@ -213,15 +235,23 @@ class FirestoreMissionStore implements MissionStore {
   async upsertTask(userId: string, input: TaskInput) {
     const now = Date.now();
     const existing = input.id ? await getCollectionDoc("tasks", userId, input.id) : null;
+    const title = input.title.trim() || existing?.title || "Untitled mission";
+    const appearance = resolveTaskAppearance({
+      title,
+      icon: input.icon ?? existing?.icon,
+      color: input.color ?? existing?.color,
+    });
     const task: Task = {
       id: existing?.id ?? input.id ?? randomUUID(),
       userId,
-      title: input.title.trim() || existing?.title || "Untitled mission",
+      title,
       status: asTaskStatus(input.status ?? existing?.status),
       priority: asPriority(input.priority ?? existing?.priority),
       dueAt: parseWhen(input.dueAt) ?? existing?.dueAt,
       tags: input.tags ?? existing?.tags ?? [],
       notes: input.notes ?? existing?.notes,
+      icon: appearance.icon,
+      color: appearance.color,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       completedAt:
@@ -231,6 +261,11 @@ class FirestoreMissionStore implements MissionStore {
     };
     await setCollectionDoc("tasks", task);
     return task;
+  }
+
+  async deleteTask(userId: string, id: string) {
+    const removed = await deleteCollectionDoc("tasks", userId, id);
+    if (!removed) throw new Error("Mission not found.");
   }
 
   async completeTask(userId: string, id: string) {
@@ -265,24 +300,57 @@ class FirestoreMissionStore implements MissionStore {
     return note;
   }
 
+  async listMemories(userId: string) {
+    const notes = await listCollection("memories", userId);
+    return notes.sort((a, b) => b.createdAt - a.createdAt);
+  }
+
   async recall(userId: string, query?: string) {
-    const notes = (await listCollection("memories", userId)).sort(
-      (a, b) => b.createdAt - a.createdAt,
-    );
+    const notes = await this.listMemories(userId);
     if (!query?.trim()) return notes.slice(0, 8);
     const q = query.toLowerCase();
     return notes.filter((note) => note.text.toLowerCase().includes(q)).slice(0, 8);
   }
 
-  async listChats(userId: string) {
+  async forgetMemory(userId: string, id: string) {
+    const removed = await deleteCollectionDoc("memories", userId, id);
+    if (!removed) throw new Error("Memory not found.");
+  }
+
+  async listChatThreads(userId: string) {
     const chats = await listCollection("chats", userId);
-    return chats
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .map((chat) => ({
-        id: chat.id,
-        title: chat.title || "Conversation",
-        updatedAt: chat.updatedAt,
-      }));
+    return chats.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async listAllChatThreads() {
+    await ensureMemory();
+    if (firestoreEnabled()) {
+      const snap = await adminDb.collectionGroup("chats").get();
+      const threads: ChatThread[] = [];
+      for (const doc of snap.docs) {
+        const data = doc.data() as Partial<ChatThread>;
+        const userId = data.userId || doc.ref.parent.parent?.id;
+        if (!userId) continue;
+        threads.push({
+          id: doc.id,
+          userId,
+          title: data.title || "Conversation",
+          messages: Array.isArray(data.messages) ? data.messages : [],
+          updatedAt: typeof data.updatedAt === "number" ? data.updatedAt : 0,
+        });
+      }
+      return threads.sort((a, b) => b.updatedAt - a.updatedAt);
+    }
+    return [...memory().chats.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async listChats(userId: string) {
+    const chats = await this.listChatThreads(userId);
+    return chats.map((chat) => ({
+      id: chat.id,
+      title: chat.title || "Conversation",
+      updatedAt: chat.updatedAt,
+    }));
   }
 
   async getChat(userId: string, id: string) {
@@ -319,11 +387,26 @@ class FirestoreMissionStore implements MissionStore {
     return thread;
   }
 
+  async renameChat(userId: string, id: string, title: string) {
+    const existing = await this.getChat(userId, id);
+    if (!existing) throw new Error("Conversation not found.");
+    const trimmed = title.trim().slice(0, 80);
+    if (!trimmed) throw new Error("Title is required.");
+    const thread: ChatThread = { ...existing, title: trimmed };
+    await setCollectionDoc("chats", thread);
+    return thread;
+  }
+
+  async deleteChat(userId: string, id: string) {
+    const removed = await deleteCollectionDoc("chats", userId, id);
+    if (!removed) throw new Error("Conversation not found.");
+  }
+
   async loadSnapshot(userId: string): Promise<MissionSnapshot> {
     const [user, tasks, memories] = await Promise.all([
       this.getUser(userId),
       this.listTasks(userId),
-      this.recall(userId),
+      this.listMemories(userId),
     ]);
     return {
       user: user ?? {
@@ -349,6 +432,8 @@ class FirestoreMissionStore implements MissionStore {
       priority: "medium",
       dueAt: today + 8 * 60 * 60 * 1000,
       tags: ["work"],
+      icon: "users",
+      color: "amber",
     });
     await this.upsertTask(userId, {
       title: "Finalize HUD panel spacing",
@@ -356,6 +441,8 @@ class FirestoreMissionStore implements MissionStore {
       priority: "high",
       dueAt: today + 12 * 60 * 60 * 1000,
       tags: ["jarvis", "ui"],
+      icon: "code",
+      color: "cyan",
     });
     await this.upsertTask(userId, {
       title: "Deep-work block: voice pipeline",
@@ -364,6 +451,8 @@ class FirestoreMissionStore implements MissionStore {
       dueAt: today + 16 * 60 * 60 * 1000,
       tags: ["speech"],
       notes: "Phase 2 — Web Speech API into the Talk bar.",
+      icon: "mic",
+      color: "violet",
     });
     await this.upsertTask(userId, {
       title: "Design review — Command Center v1",
@@ -371,6 +460,8 @@ class FirestoreMissionStore implements MissionStore {
       priority: "medium",
       dueAt: today + 26 * 60 * 60 * 1000,
       tags: ["review"],
+      icon: "pen",
+      color: "gold",
     });
     await this.remember(
       userId,
