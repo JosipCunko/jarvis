@@ -1,11 +1,13 @@
 import "server-only";
 import { getJarvisTimezone } from "@/app/_lib/config";
+import { zonedDayRangeIso } from "@/app/_lib/time";
 import { googleApi } from "./google-oauth";
 import { getMissionStore } from "@/app/_lib/mission-store";
 import type { ChatAttachment } from "@/app/_types/jarvis";
 
 type CalendarEvent = {
   id?: string;
+  status?: string;
   summary?: string;
   htmlLink?: string;
   hangoutLink?: string;
@@ -84,6 +86,56 @@ export async function listCalendarEvents(
     location: event.location || "",
     link: event.htmlLink || "",
   }));
+}
+
+function formatEventWhen(start: string, end: string, timeZone: string) {
+  if (!start) return "Scheduled";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(start)) return "All day";
+  const clock = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const startLabel = clock.format(new Date(start));
+  if (!end || /^\d{4}-\d{2}-\d{2}$/.test(end)) return startLabel;
+  return `${startLabel}–${clock.format(new Date(end))}`;
+}
+
+export async function listTodayCalendarEvents(userId: string) {
+  const timeZone = getJarvisTimezone();
+  const { timeMin, timeMax } = zonedDayRangeIso(timeZone);
+  const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
+  url.searchParams.set("singleEvents", "true");
+  url.searchParams.set("orderBy", "startTime");
+  url.searchParams.set("timeMin", timeMin);
+  url.searchParams.set("timeMax", timeMax);
+  url.searchParams.set("maxResults", "20");
+  url.searchParams.set("timeZone", timeZone);
+  const data = (await googleApi<{ items?: CalendarEvent[] }>(userId, url.toString())) ?? {
+    items: [],
+  };
+  return (data.items ?? [])
+    .filter((event) => event.status !== "cancelled")
+    .map((event) => {
+      const start = eventStamp(event);
+      const end = event.end?.dateTime || event.end?.date || "";
+      return {
+        id: event.id || start,
+        title: event.summary || "(no title)",
+        when: formatEventWhen(start, end, timeZone),
+        location: event.location || "",
+        link: event.htmlLink || "",
+      };
+    });
+}
+
+export async function countUnreadInbox(userId: string) {
+  const label = await googleApi<{ messagesUnread?: number }>(
+    userId,
+    "https://gmail.googleapis.com/gmail/v1/users/me/labels/INBOX",
+  );
+  return label?.messagesUnread ?? 0;
 }
 
 export async function createCalendarEvent(
@@ -187,13 +239,14 @@ export async function listEmails(
   userId: string,
   options: { query?: string; max_results?: number } = {},
 ) {
+  const maxResults = Math.min(Math.max(options.max_results ?? 8, 1), 20);
   const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
-  url.searchParams.set("maxResults", String(Math.min(Math.max(options.max_results ?? 8, 1), 20)));
+  url.searchParams.set("maxResults", String(maxResults));
   if (options.query) url.searchParams.set("q", options.query);
   const list =
     (await googleApi<GmailList>(userId, url.toString())) ?? { messages: [] };
   const messages = await Promise.all(
-    (list.messages ?? []).slice(0, 8).map(async (item: { id: string }) => {
+    (list.messages ?? []).slice(0, maxResults).map(async (item: { id: string }) => {
       const message = await googleApi<GmailMessage>(
         userId,
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${item.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,

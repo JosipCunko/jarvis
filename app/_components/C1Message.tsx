@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { C1Component, ThemeProvider } from "@thesysai/genui-sdk";
 import "@crayonai/react-ui/styles/index.css";
 import { readableFromGenUi, toC1Response } from "@/app/_lib/c1";
@@ -42,15 +42,31 @@ export default function C1Message({
   content,
   isStreaming = false,
   onAction,
+  onLayout,
 }: {
   content: string;
   isStreaming?: boolean;
   onAction?: (text: string) => void;
+  onLayout?: () => void;
 }) {
   const [failed, setFailed] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const c1Response = useMemo(() => toC1Response(content), [content]);
 
+  useLayoutEffect(() => {
+    onLayout?.();
+    const node = rootRef.current;
+    if (!node || !onLayout) return;
+    const observer = new ResizeObserver(() => {
+      requestAnimationFrame(() => onLayout());
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [onLayout, content]);
+
   if (failed) {
+    const unfinished = /<content\b/i.test(content) && !/<\/content>/i.test(content);
+    if (unfinished) return null;
     return (
       <p className="whitespace-pre-wrap text-sm text-ink">
         {readableFromGenUi(content)}
@@ -59,7 +75,7 @@ export default function C1Message({
   }
 
   return (
-    <div className="jarvis-c1 w-full min-w-0 overflow-x-auto">
+    <div ref={rootRef} className="jarvis-c1 w-full min-w-0 overflow-x-auto">
       <ThemeProvider mode="dark" cssSelector=".jarvis-c1" theme={JARVIS_THEME}>
         <C1Component
           c1Response={c1Response}

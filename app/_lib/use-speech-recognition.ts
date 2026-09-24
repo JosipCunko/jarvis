@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
-export const END_OF_TURN_SILENCE_MS = 2000;
+export const END_OF_TURN_SILENCE_MS = 1000;
 
 export type SpeechStartOptions = {
   continuous?: boolean;

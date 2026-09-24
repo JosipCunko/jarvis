@@ -5,6 +5,7 @@ import { ListChecks, Plus, Search } from "lucide-react";
 import { Button } from "@/app/_components/Button";
 import { TaskCard } from "@/app/_components/TaskCard";
 import { notifyError, notifySuccess } from "@/app/_components/notify";
+import { NEW_MISSION_PROMPT } from "@/app/_lib/mission-repeat";
 import { cn } from "@/app/_lib/cn";
 import { startOfToday } from "@/app/_lib/time";
 import type { Task, TaskStatus } from "@/app/_types/jarvis";
@@ -28,7 +29,7 @@ export function TasksView({
     const q = query.trim().toLowerCase();
     const matched = q
       ? tasks.filter((task) =>
-          `${task.title} ${task.notes ?? ""} ${task.tags.join(" ")}`.toLowerCase().includes(q),
+          `${task.title} ${task.course ?? ""} ${task.kind ?? ""} ${task.notes ?? ""} ${task.tags.join(" ")}`.toLowerCase().includes(q),
         )
       : tasks;
     const active = matched
@@ -106,9 +107,7 @@ export function TasksView({
             size="sm"
             variant="solid"
             onClick={() =>
-              onAskJarvis(
-                "Help me create a new task. Ask me for the title and due date if needed.",
-              )
+              onAskJarvis(NEW_MISSION_PROMPT)
             }
           >
             <Plus size={14} />

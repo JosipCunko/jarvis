@@ -62,6 +62,35 @@ export function formatZonedStamp(timeZone: string, at = new Date()) {
   return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)} ${pad2(parts.hour)}:${pad2(parts.minute)}`;
 }
 
+function wallClockUtc(
+  timeZone: string,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+) {
+  const desired = Date.UTC(year, month - 1, day, hour, minute);
+  let utc = desired;
+  for (let pass = 0; pass < 3; pass += 1) {
+    const parts = zonedDateParts(timeZone, new Date(utc));
+    const shown = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+    const delta = desired - shown;
+    if (delta === 0) break;
+    utc += delta;
+  }
+  return new Date(utc);
+}
+
+export function zonedDayRangeIso(timeZone: string, at = new Date()) {
+  const today = zonedDateParts(timeZone, at);
+  const next = addDaysToYmd(today.year, today.month, today.day, 1);
+  return {
+    timeMin: wallClockUtc(timeZone, today.year, today.month, today.day, 0, 0).toISOString(),
+    timeMax: wallClockUtc(timeZone, next.year, next.month, next.day, 0, 0).toISOString(),
+  };
+}
+
 function addDaysToYmd(year: number, month: number, day: number, days: number) {
   const date = new Date(Date.UTC(year, month - 1, day + days));
   return {

@@ -34,10 +34,11 @@ export async function PATCH(request: Request) {
     return Response.json({ error: { message: "Mission not found." } }, { status: 404 });
   }
   const nextStatus = status as TaskStatus;
-  const task =
-    nextStatus === "done"
-      ? await store.completeTask(userId, id)
-      : await store.upsertTask(userId, {
+  if (nextStatus === "done") {
+    const completed = await store.completeTask(userId, id);
+    return Response.json({ task: completed.task, next: completed.next });
+  }
+  const task = await store.upsertTask(userId, {
           id,
           title: existing.title,
           status: nextStatus,

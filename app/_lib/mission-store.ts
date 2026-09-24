@@ -5,6 +5,7 @@ import path from "path";
 import { differenceInCalendarDays } from "date-fns";
 import { adminDb } from "./admin";
 import { isFirebaseAdminConfigured } from "./config";
+import { nextRepeatDue, normalizeRepeat } from "./mission-repeat";
 import { resolveTaskAppearance } from "./task-appearance";
 import { parseWhen, startOfToday } from "./time";
 import type {
@@ -13,6 +14,9 @@ import type {
   ChatThread,
   GoogleAccount,
   MemoryNote,
+  MissionCompletion,
+  MissionKind,
+  MissionRepeat,
   MissionSnapshot,
   MissionStore,
   Task,
@@ -103,6 +107,30 @@ function userCol(userId: string, collection: CollectionName) {
   return adminDb.collection("users").doc(userId).collection(collection);
 }
 
+function resolveKind(input: MissionKind | null | undefined, existing?: MissionKind) {
+  if (input === null) return undefined;
+  return input ?? existing;
+}
+
+function resolveRepeat(input: MissionRepeat | null | undefined, existing?: MissionRepeat) {
+  if (input === null) return undefined;
+  if (input) return normalizeRepeat(input);
+  return existing ? normalizeRepeat(existing) : undefined;
+}
+
+function blankToUndefined(value?: string) {
+  const text = value?.trim();
+  return text ? text : undefined;
+}
+
+function compactTask(task: Task) {
+  const copy = { ...task };
+  (Object.keys(copy) as (keyof Task)[]).forEach((key) => {
+    if (copy[key] === undefined) delete copy[key];
+  });
+  return copy;
+}
+
 function asTaskStatus(value: unknown): TaskStatus {
   return value === "in_progress" || value === "done" ? value : "open";
 }
@@ -125,7 +153,7 @@ function matchesFilter(task: Task, filter?: TaskFilter) {
   }
   if (filter.query) {
     const q = filter.query.toLowerCase();
-    const hay = `${task.title} ${task.notes ?? ""} ${task.tags.join(" ")}`.toLowerCase();
+    const hay = `${task.title} ${task.course ?? ""} ${task.kind ?? ""} ${task.notes ?? ""} ${task.tags.join(" ")}`.toLowerCase();
     if (!hay.includes(q)) return false;
   }
   return true;
@@ -241,24 +269,29 @@ class FirestoreMissionStore implements MissionStore {
       icon: input.icon ?? existing?.icon,
       color: input.color ?? existing?.color,
     });
-    const task: Task = {
-      id: existing?.id ?? input.id ?? randomUUID(),
+    const status = asTaskStatus(input.status ?? existing?.status);
+    const id = existing?.id ?? input.id ?? randomUUID();
+    const repeat = resolveRepeat(input.repeat, existing?.repeat);
+    const seriesId = repeat ? existing?.seriesId ?? input.seriesId ?? id : existing?.seriesId;
+    const task = compactTask({
+      id,
       userId,
       title,
-      status: asTaskStatus(input.status ?? existing?.status),
+      status,
       priority: asPriority(input.priority ?? existing?.priority),
       dueAt: parseWhen(input.dueAt) ?? existing?.dueAt,
       tags: input.tags ?? existing?.tags ?? [],
-      notes: input.notes ?? existing?.notes,
+      notes: input.notes === null ? undefined : input.notes ?? existing?.notes,
       icon: appearance.icon,
       color: appearance.color,
+      kind: resolveKind(input.kind, existing?.kind),
+      course: input.course === null ? undefined : blankToUndefined(input.course ?? existing?.course),
+      repeat,
+      seriesId,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
-      completedAt:
-        asTaskStatus(input.status ?? existing?.status) === "done"
-          ? existing?.completedAt ?? now
-          : undefined,
-    };
+      completedAt: status === "done" ? existing?.completedAt ?? now : undefined,
+    });
     await setCollectionDoc("tasks", task);
     return task;
   }
@@ -268,22 +301,44 @@ class FirestoreMissionStore implements MissionStore {
     if (!removed) throw new Error("Mission not found.");
   }
 
-  async completeTask(userId: string, id: string) {
+  async completeTask(userId: string, id: string): Promise<MissionCompletion> {
     const existing = await getCollectionDoc("tasks", userId, id);
-    if (!existing) throw new Error("Task not found.");
-    const task: Task = {
+    if (!existing) throw new Error("Mission not found.");
+    if (existing.status === "done") return { task: existing, next: null };
+    const now = Date.now();
+    const seriesId = existing.repeat ? existing.seriesId ?? existing.id : existing.seriesId;
+    const task = compactTask({
       ...existing,
+      seriesId,
       status: "done",
-      completedAt: Date.now(),
-      updatedAt: Date.now(),
-    };
+      completedAt: now,
+      updatedAt: now,
+    });
     await setCollectionDoc("tasks", task);
-    return task;
+    const nextAt = existing.repeat ? nextRepeatDue(existing.dueAt, existing.repeat, now) : undefined;
+    if (nextAt == null || !seriesId) return { task, next: null };
+    const peers = await listCollection("tasks", userId);
+    const hasOpen = peers.some(
+      (item) => item.id !== existing.id && item.seriesId === seriesId && item.status !== "done",
+    );
+    if (hasOpen) return { task, next: null };
+    const next = compactTask({
+      ...existing,
+      id: randomUUID(),
+      seriesId: seriesId ?? existing.id,
+      status: "open",
+      dueAt: nextAt,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: undefined,
+    });
+    await setCollectionDoc("tasks", next);
+    return { task, next };
   }
 
   async rescheduleTask(userId: string, id: string, dueAt: number) {
     const existing = await getCollectionDoc("tasks", userId, id);
-    if (!existing) throw new Error("Task not found.");
+    if (!existing) throw new Error("Mission not found.");
     const task: Task = { ...existing, dueAt, updatedAt: Date.now() };
     await setCollectionDoc("tasks", task);
     return task;

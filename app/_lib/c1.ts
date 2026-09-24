@@ -184,6 +184,53 @@ function formattedCode(value: string) {
   return value.includes("\n") ? value.trim() : formatCode(value);
 }
 
+function codeFence(language: string, code: string) {
+  const body = formattedCode(code).replace(/\s+$/, "");
+  let tick = "```";
+  while (body.includes(tick)) tick += "`";
+  const lang = /^[A-Za-z][\w#+.-]*$/.test(language) ? language : "javascript";
+  return `${tick}${lang}\n${body}\n${tick}`;
+}
+
+function textContentCall(language: string, code: string) {
+  return `TextContent(${JSON.stringify(codeFence(language, code))})`;
+}
+
+function codeFromArgs(values: string[]) {
+  const strings = values.map((value) => value.trim()).filter(Boolean);
+  if (strings.length >= 2 && strings[0].length <= 20 && !isCodeSnippet(strings[0])) {
+    return { language: strings[0], code: strings[1] };
+  }
+  return { language: "javascript", code: strings[strings.length - 1] ?? "" };
+}
+
+function rewriteCodeBlockCall(source: string, parenIndex: number) {
+  let i = parenIndex + 1;
+  let depth = 1;
+  const values: string[] = [];
+  while (i < source.length && depth > 0) {
+    const ch = source[i];
+    if (ch === '"' || ch === "'") {
+      const quoted = readQuoted(source, i);
+      if (!quoted) return null;
+      values.push(quoted.value);
+      i = quoted.end;
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") depth += 1;
+    else if (ch === ")" || ch === "]" || ch === "}") {
+      depth -= 1;
+      if (depth === 0 && ch === ")") {
+        const { language, code } = codeFromArgs(values);
+        if (!code) return null;
+        return { text: textContentCall(language, code), end: i + 1 };
+      }
+    }
+    i += 1;
+  }
+  return null;
+}
+
 function insertCodeRefs(source: string, refs: string) {
   const match = /Card\s*\(\s*\[/.exec(source);
   if (!match) return source;
@@ -222,16 +269,149 @@ function insertCodeRefs(source: string, refs: string) {
   return source;
 }
 
+function matchBracket(source: string, open: number) {
+  let depth = 0;
+  let quote = "";
+  for (let i = open; i < source.length; i += 1) {
+    const ch = source[i];
+    if (quote) {
+      if (ch === "\\") {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "[") depth += 1;
+    else if (ch === "]") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function splitTopLevel(source: string) {
+  const parts: string[] = [];
+  let quote = "";
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    if (quote) {
+      if (ch === "\\") {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") depth += 1;
+    else if (ch === ")" || ch === "]" || ch === "}") depth -= 1;
+    else if (ch === "," && depth === 0) {
+      parts.push(source.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(source.slice(start));
+  return parts;
+}
+
+function removeBracketIdents(source: string, names: Set<string>) {
+  let out = "";
+  let quote = "";
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    if (quote) {
+      out += ch;
+      if (ch === "\\") {
+        const next = source[i + 1];
+        if (next) {
+          out += next;
+          i += 1;
+        }
+        continue;
+      }
+      if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === "[") {
+      const end = matchBracket(source, i);
+      if (end < 0) {
+        out += ch;
+        continue;
+      }
+      const parts = splitTopLevel(source.slice(i + 1, end));
+      const kept = parts.map((part) => part.trim()).filter((part) => part && !names.has(part));
+      if (kept.length === parts.filter((part) => part.trim()).length) {
+        out += source.slice(i, end + 1);
+      } else {
+        out += `[${kept.join(", ")}]`;
+      }
+      i = end;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+function dropHoistedSnippetCards(source: string, itemNames: Set<string>) {
+  if (itemNames.size === 0) return source;
+  const drop = new Set<string>();
+  const blockRe = /([A-Za-z_]\w*)\s*=\s*SnippetCardBlock\s*\(\s*\[/g;
+  let match: RegExpExecArray | null;
+  while ((match = blockRe.exec(source))) {
+    const bracket = match.index + match[0].length - 1;
+    const end = matchBracket(source, bracket);
+    if (end < 0) continue;
+    const items = splitTopLevel(source.slice(bracket + 1, end))
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (items.length > 0 && items.every((item) => itemNames.has(item))) drop.add(match[1]);
+  }
+  return drop.size === 0 ? source : removeBracketIdents(source, drop);
+}
+
 export function prettifyOpenUiCode(source: string) {
   const blocks: string[] = [];
   const stack: string[] = [];
+  const snippetItems = new Set<string>();
+  let assignment = "";
   let out = "";
   for (let i = 0; i < source.length; i += 1) {
     const ident = source.slice(i).match(/^[A-Za-z_]\w*/);
     if (ident) {
       let j = i + ident[0].length;
       while (source[j] === " " || source[j] === "\n" || source[j] === "\t") j += 1;
+      if (source[j] === "=") {
+        assignment = ident[0];
+        out += ident[0];
+        i += ident[0].length - 1;
+        continue;
+      }
       if (source[j] === "(") {
+        if (ident[0] === "CodeBlock") {
+          const rewritten = rewriteCodeBlockCall(source, j);
+          if (rewritten) {
+            out += rewritten.text;
+            i = rewritten.end - 1;
+            continue;
+          }
+        }
         stack.push(ident[0]);
         out += source.slice(i, j + 1);
         i = j;
@@ -255,13 +435,14 @@ export function prettifyOpenUiCode(source: string) {
         out += source.slice(i);
         break;
       }
-      const insideCodeBlock = stack.includes("CodeBlock");
+      const insideText = stack.includes("TextContent");
       const snippet = isCodeSnippet(quoted.value) || looksLikeMinifiedCode(quoted.value);
-      if (insideCodeBlock && looksLikeMinifiedCode(quoted.value)) {
-        out += JSON.stringify(formattedCode(quoted.value));
-      } else if (!insideCodeBlock && snippet && !quoted.value.includes("```")) {
+      if (insideText && snippet && !quoted.value.includes("```")) {
+        out += JSON.stringify(codeFence("javascript", quoted.value));
+      } else if (!insideText && snippet && !quoted.value.includes("```")) {
         const id = `jarvisCode${blocks.length}`;
-        blocks.push(`${id} = CodeBlock("javascript", ${JSON.stringify(formattedCode(quoted.value))})`);
+        blocks.push(`${id} = ${textContentCall("javascript", quoted.value)}`);
+        if (stack.includes("SnippetCardItem") && assignment) snippetItems.add(assignment);
         out += '""';
       } else {
         const next = quoted.value.includes("```") ? prettifyFencedCode(quoted.value) : quoted.value;
@@ -274,7 +455,31 @@ export function prettifyOpenUiCode(source: string) {
   }
   if (blocks.length === 0) return out;
   const refs = blocks.map((_, index) => `jarvisCode${index}`).join(", ");
-  return `${insertCodeRefs(out, refs)}\n${blocks.join("\n")}`;
+  const withoutSnippets = dropHoistedSnippetCards(out, snippetItems);
+  return insertStatements(insertCodeRefs(withoutSnippets, refs), blocks.join("\n"));
+}
+
+function insertStatements(source: string, statements: string) {
+  let quote = "";
+  let fenceAt = -1;
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    if (quote) {
+      if (ch === "\\") {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (source.startsWith("```", i)) fenceAt = i;
+  }
+  if (fenceAt < 0) return `${source}\n${statements}`;
+  return `${source.slice(0, fenceAt)}${statements}\n${source.slice(fenceAt)}`;
 }
 
 function prettifyWrapped(content: string) {
@@ -411,7 +616,7 @@ function stringsToSpeak(name: string, args: string[]) {
   if (HEADING_COMPONENTS.has(name) || name === "CodeBlock") return [];
   if (name === "TextContent" || name === "Text") {
     const text = args.find((arg) => isSpokenPhrase(arg));
-    if (!text) return [];
+    if (!text || text.includes("```") || isCodeSnippet(text)) return [];
     const heading = args.some((arg) => HEADING_SIZE.test(arg.trim()));
     const shortLabel = !isSentence(text) && text.trim().split(/\s+/).length <= 4;
     if (heading || shortLabel) return [];
@@ -471,11 +676,14 @@ export function speakableReply(content: string) {
 
 export function readableFromGenUi(content: string) {
   const lines = extractOpenUi(content)
+    .replace(/<\/?(?:content|custommarkdown)\b[^>]*>/gi, " ")
+    .replace(/<[^>\n]*>/g, " ")
     .split("\n")
     .map((line) => line.trim().replace(/^["']|["']$/g, ""))
     .filter((line) => {
       if (!line || line === "number" || line === "true" || line === ">") return false;
       if (line.startsWith("```")) return false;
+      if (/^<\/?[a-z]/i.test(line) || line.includes("thesys=")) return false;
       if (/^[A-Za-z_]\w*\s*=/.test(line)) return false;
       if (/^[A-Z][A-Za-z]+\($/.test(line)) return false;
       if (/^[\]\),]+$/.test(line)) return false;
@@ -483,6 +691,16 @@ export function readableFromGenUi(content: string) {
     });
   if (lines.length === 0) return "Standing by, sir.";
   return [...new Set(lines)].join("\n");
+}
+
+/** Text worth keeping when a reply is cancelled before it finishes. */
+export function stoppedReplyText(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+  if (!looksLikeGenUi(trimmed)) return trimmed;
+  const readable = speakableReply(trimmed);
+  if (!readable || looksLikeGenUi(readable)) return null;
+  return readable;
 }
 
 function escapeXml(value: string) {

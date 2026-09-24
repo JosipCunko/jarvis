@@ -8,17 +8,39 @@ import {
   readEmail,
   sendEmail,
 } from "./google-services";
+import { readWhatsAppContacts, readWhatsAppMessages, sendWhatsAppMessage } from "./whatsapp";
 import { getProviderCredits } from "./credits";
 import { researchWeb } from "./web-research";
+import {
+  MISSION_KINDS,
+  missionKindLabel,
+  parseMissionKind,
+  parseRepeatArg,
+  repeatLabel,
+} from "./mission-repeat";
 import { resolveTaskAppearance, TASK_COLOR_IDS, TASK_ICON_IDS, taskAppearanceGuide } from "./task-appearance";
 import { formatWhen, parseWhen, startOfToday, endOfToday } from "./time";
-import type { ChatAttachment, FunctionResult, Task } from "@/app/_types/jarvis";
+import type { ChatAttachment, FunctionResult, Task, TaskPriority } from "@/app/_types/jarvis";
+
+function repeatParameters() {
+  return {
+    type: "object",
+    description:
+      "Omit for a one-off. frequency none stops repeating. weekdays is only for weekly: 0 is Sunday through 6 Saturday.",
+    properties: {
+      frequency: { type: "string", enum: ["daily", "weekly", "weekdays", "none"] },
+      interval: { type: "number", description: "Every N days or weeks. Default 1." },
+      weekdays: { type: "array", items: { type: "number" } },
+      until: { type: "string", description: "Last date this repeat may occur. YYYY-MM-DD or ISO datetime." },
+    },
+  };
+}
 
 export const AI_FUNCTIONS = [
   {
     name: "get_briefing",
     description:
-      "Get today's mission briefing: overdue tasks, due today, and in-progress work.",
+      "Get today's mission briefing: overdue missions, due today, and in-progress work.",
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
@@ -28,8 +50,8 @@ export const AI_FUNCTIONS = [
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
-    name: "list_tasks",
-    description: "List missions/tasks. Defaults to active (not done) tasks.",
+    name: "list_missions",
+    description: "List missions. Defaults to active (not done) missions. Read-only.",
     parameters: {
       type: "object",
       properties: {
@@ -44,16 +66,19 @@ export const AI_FUNCTIONS = [
     },
   },
   {
-    name: "create_task",
-    description: `Create a new mission/task for the operator. Always choose icon and color from the library so the mission card matches the work. ${taskAppearanceGuide()}`,
+    name: "create_mission",
+    description: `Create a new mission. Only you can create missions. Always choose icon and color from the library so the card matches the work. Set kind and course when you know them. Omit repeat for a one-off. ${taskAppearanceGuide()}`,
     parameters: {
       type: "object",
       properties: {
         title: { type: "string" },
+        kind: { type: "string", enum: [...MISSION_KINDS] },
+        course: { type: "string", description: "Subject or class name." },
         due_at: { type: "string", description: "ISO datetime or natural date." },
         priority: { type: "string", enum: ["low", "medium", "high"] },
         tags: { type: "array", items: { type: "string" } },
         notes: { type: "string" },
+        repeat: repeatParameters(),
         icon: {
           type: "string",
           enum: [...TASK_ICON_IDS],
@@ -69,28 +94,38 @@ export const AI_FUNCTIONS = [
     },
   },
   {
-    name: "complete_task",
-    description: "Mark a task done. Prefer task_id; otherwise match by title.",
+    name: "update_mission",
+    description:
+      "Update an existing mission's title, course, kind, due date, priority, notes, tags, icon, color, or repeat. Use this to reschedule. Pass repeat.frequency none to stop repeating. You cannot delete a mission and you cannot mark it complete with this tool.",
     parameters: {
       type: "object",
       properties: {
-        task_id: { type: "string" },
-        title: { type: "string" },
+        mission_id: { type: "string" },
+        title: { type: "string", description: "Current title to find it, or the new title when mission_id is set." },
+        kind: { type: "string", enum: [...MISSION_KINDS] },
+        course: { type: "string" },
+        due_at: { type: "string", description: "ISO datetime or natural date." },
+        priority: { type: "string", enum: ["low", "medium", "high"] },
+        tags: { type: "array", items: { type: "string" } },
+        notes: { type: "string" },
+        repeat: repeatParameters(),
+        icon: { type: "string", enum: [...TASK_ICON_IDS] },
+        color: { type: "string", enum: [...TASK_COLOR_IDS] },
       },
       required: [],
     },
   },
   {
-    name: "reschedule_task",
-    description: "Move a task due date. Prefer task_id; otherwise match by title.",
+    name: "complete_mission",
+    description:
+      "Mark a mission done only when the operator explicitly says it is finished. Prefer mission_id; otherwise match by title. If it repeats, the next occurrence is created automatically.",
     parameters: {
       type: "object",
       properties: {
-        task_id: { type: "string" },
+        mission_id: { type: "string" },
         title: { type: "string" },
-        due_at: { type: "string", description: "ISO datetime." },
       },
-      required: ["due_at"],
+      required: [],
     },
   },
   {
@@ -189,6 +224,49 @@ export const AI_FUNCTIONS = [
     },
   },
   {
+    name: "read_whatsapp_messages",
+    description:
+      "Read WhatsApp messages. Use for unread WhatsApp, a contact's chat, or one message id. Returns sender, text, and time. Photos on those messages are attached for you to describe.",
+    parameters: {
+      type: "object",
+      properties: {
+        contact: { type: "string", description: "Optional contact name or phone." },
+        unread_only: { type: "boolean", description: "Only unread messages." },
+        message_id: { type: "string", description: "One message id, when the operator names it." },
+        max_results: { type: "number" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "read_whatsapp_contacts",
+    description: "Search the operator's WhatsApp contacts by name or phone.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Name or phone. Omit to list recent contacts." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "send_whatsapp_message",
+    description:
+      "Send a WhatsApp message to a contact name or phone number. If they pasted or attached images, set attach_chat_images true so those images are sent with the message.",
+    parameters: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "Contact name or phone number." },
+        text: { type: "string" },
+        attach_chat_images: {
+          type: "boolean",
+          description: "Send images pasted in this chat message. Default true if images are present.",
+        },
+      },
+      required: ["to"],
+    },
+  },
+  {
     name: "research_web",
     description:
       "Search the web once and return source titles, urls, and snippets. Use only when the operator asks to research the web, look it up, go on Google, double-check, verify, or fact-check. Croatian: istraži, provjeri na netu, idi na google, jesi siguran. Do not use for missions, calendar, Gmail, memories, or credits.",
@@ -216,11 +294,36 @@ function serializeTask(task: Task) {
     title: task.title,
     status: task.status,
     priority: task.priority,
+    kind: task.kind ? missionKindLabel(task.kind) : "",
+    course: task.course ?? "",
     due: task.dueAt ? formatWhen(task.dueAt) : "unscheduled",
+    repeat: repeatLabel(task.repeat) || "none",
     tags: task.tags,
     notes: task.notes ?? "",
     icon: look.icon,
     color: look.color,
+  };
+}
+
+function asPriority(value: unknown): TaskPriority {
+  return value === "low" || value === "high" ? value : "medium";
+}
+
+function missionFields(args: Record<string, unknown>) {
+  const kind = parseMissionKind(args.kind);
+  const repeat = parseRepeatArg(args.repeat);
+  return {
+    kind,
+    course: typeof args.course === "string" ? args.course : undefined,
+    repeat,
+    notes: typeof args.notes === "string" ? args.notes : undefined,
+    tags: Array.isArray(args.tags) ? args.tags.map(String) : undefined,
+    icon: typeof args.icon === "string" ? args.icon : undefined,
+    color: typeof args.color === "string" ? args.color : undefined,
+    priority: args.priority === "low" || args.priority === "medium" || args.priority === "high"
+      ? asPriority(args.priority)
+      : undefined,
+    dueAt: typeof args.due_at === "string" ? args.due_at : undefined,
   };
 }
 
@@ -289,7 +392,7 @@ export async function executeFunctions(
             generatedAt: formatWhen(now),
           },
         });
-      } else if (call.name === "list_tasks") {
+      } else if (call.name === "list_missions") {
         const status =
           args.status === "open" ||
           args.status === "in_progress" ||
@@ -305,47 +408,78 @@ export async function executeFunctions(
           name: call.name,
           result: { count: tasks.length, tasks: tasks.map(serializeTask) },
         });
-      } else if (call.name === "create_task") {
-        const task = await store.upsertTask(userId, {
-          title: String(args.title ?? ""),
-          dueAt: typeof args.due_at === "string" ? args.due_at : undefined,
-          priority:
-            args.priority === "low" || args.priority === "high" ? args.priority : "medium",
-          tags: Array.isArray(args.tags) ? args.tags.map(String) : [],
-          notes: typeof args.notes === "string" ? args.notes : undefined,
-          icon: typeof args.icon === "string" ? args.icon : undefined,
-          color: typeof args.color === "string" ? args.color : undefined,
-        });
-        results.push({ name: call.name, result: { ok: true, task: serializeTask(task) } });
-      } else if (call.name === "complete_task") {
-        const found = await findTask(
-          userId,
-          typeof args.task_id === "string" ? args.task_id : undefined,
-          typeof args.title === "string" ? args.title : undefined,
-        );
-        if (!found) {
-          results.push({ name: call.name, result: { error: "Task not found" } });
-          continue;
-        }
-        const task = await store.completeTask(userId, found.id);
-        results.push({ name: call.name, result: { ok: true, task: serializeTask(task) } });
-      } else if (call.name === "reschedule_task") {
-        const dueAt = parseWhen(typeof args.due_at === "string" ? args.due_at : undefined);
-        if (!dueAt) {
+      } else if (call.name === "create_mission") {
+        const fields = missionFields(args);
+        const dueAt = typeof args.due_at === "string" ? parseWhen(args.due_at) : undefined;
+        if (typeof args.due_at === "string" && args.due_at.trim() && dueAt == null) {
           results.push({ name: call.name, result: { error: "Invalid due_at" } });
           continue;
         }
+        const task = await store.upsertTask(userId, {
+          title: String(args.title ?? ""),
+          dueAt: fields.dueAt,
+          priority: fields.priority ?? "medium",
+          tags: fields.tags ?? [],
+          notes: fields.notes,
+          icon: fields.icon,
+          color: fields.color,
+          kind: fields.kind,
+          course: fields.course,
+          repeat: fields.repeat,
+        });
+        results.push({ name: call.name, result: { ok: true, task: serializeTask(task) } });
+      } else if (call.name === "update_mission") {
         const found = await findTask(
           userId,
-          typeof args.task_id === "string" ? args.task_id : undefined,
+          typeof args.mission_id === "string" ? args.mission_id : undefined,
           typeof args.title === "string" ? args.title : undefined,
         );
         if (!found) {
-          results.push({ name: call.name, result: { error: "Task not found" } });
+          results.push({ name: call.name, result: { error: "Mission not found" } });
           continue;
         }
-        const task = await store.rescheduleTask(userId, found.id, dueAt);
+        const fields = missionFields(args);
+        if (typeof args.due_at === "string" && args.due_at.trim() && parseWhen(args.due_at) == null) {
+          results.push({ name: call.name, result: { error: "Invalid due_at" } });
+          continue;
+        }
+        const nextTitle =
+          typeof args.mission_id === "string" && typeof args.title === "string" && args.title.trim()
+            ? args.title
+            : found.title;
+        const task = await store.upsertTask(userId, {
+          id: found.id,
+          title: nextTitle,
+          dueAt: fields.dueAt,
+          priority: fields.priority,
+          tags: fields.tags,
+          notes: fields.notes,
+          icon: fields.icon,
+          color: fields.color,
+          kind: fields.kind,
+          course: fields.course,
+          repeat: fields.repeat,
+        });
         results.push({ name: call.name, result: { ok: true, task: serializeTask(task) } });
+      } else if (call.name === "complete_mission") {
+        const found = await findTask(
+          userId,
+          typeof args.mission_id === "string" ? args.mission_id : undefined,
+          typeof args.title === "string" ? args.title : undefined,
+        );
+        if (!found) {
+          results.push({ name: call.name, result: { error: "Mission not found" } });
+          continue;
+        }
+        const completed = await store.completeTask(userId, found.id);
+        results.push({
+          name: call.name,
+          result: {
+            ok: true,
+            task: serializeTask(completed.task),
+            next: completed.next ? serializeTask(completed.next) : null,
+          },
+        });
       } else if (call.name === "remember") {
         const note = await store.remember(userId, String(args.text ?? ""));
         results.push({ name: call.name, result: { ok: true, note } });
@@ -395,6 +529,31 @@ export async function executeFunctions(
             body: typeof args.body === "string" ? args.body : undefined,
             attach_chat_images:
               args.attach_chat_images === false ? false : true,
+          },
+          attachments,
+        );
+        results.push({ name: call.name, result: sent });
+      } else if (call.name === "read_whatsapp_messages") {
+        const messages = await readWhatsAppMessages(userId, {
+          contact: typeof args.contact === "string" ? args.contact : undefined,
+          unread_only: args.unread_only === true,
+          message_id: typeof args.message_id === "string" ? args.message_id : undefined,
+          max_results: typeof args.max_results === "number" ? args.max_results : undefined,
+        });
+        results.push({ name: call.name, result: messages });
+      } else if (call.name === "read_whatsapp_contacts") {
+        const contacts = await readWhatsAppContacts(
+          userId,
+          typeof args.query === "string" ? args.query : undefined,
+        );
+        results.push({ name: call.name, result: contacts });
+      } else if (call.name === "send_whatsapp_message") {
+        const sent = await sendWhatsAppMessage(
+          userId,
+          {
+            to: typeof args.to === "string" ? args.to : "",
+            text: typeof args.text === "string" ? args.text : undefined,
+            attach_chat_images: args.attach_chat_images === false ? false : true,
           },
           attachments,
         );

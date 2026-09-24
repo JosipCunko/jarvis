@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["@whiskeysockets/baileys"],
   transpilePackages: [
     "@thesysai/genui-sdk",
     "@crayonai/react-core",

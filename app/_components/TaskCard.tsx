@@ -5,6 +5,7 @@ import { Check, Play, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/app/_components/Button";
 import { TaskGlyph } from "@/app/_components/TaskGlyph";
 import { cn } from "@/app/_lib/cn";
+import { missionKindLabel, repeatLabel } from "@/app/_lib/mission-repeat";
 import { resolveTaskAppearance, taskSwatch } from "@/app/_lib/task-appearance";
 import { endOfToday, formatWhen, startOfToday } from "@/app/_lib/time";
 import type { Task, TaskPriority, TaskStatus } from "@/app/_types/jarvis";
@@ -36,6 +37,8 @@ export function TaskCard({
       ? `Closed ${formatWhen(task.completedAt ?? task.updatedAt)}`
       : formatWhen(task.dueAt)
     : "No due date";
+  const cadence = repeatLabel(task.repeat);
+  const kindCourse = [missionKindLabel(task.kind), task.course].filter(Boolean).join(" · ");
   const [notesOpen, setNotesOpen] = useState(false);
 
   return (
@@ -73,6 +76,7 @@ export function TaskCard({
           </div>
           <p className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] tracking-[0.22em] uppercase">
             <span style={{ color: done ? "var(--ok)" : swatch.hex }}>{STATUS_LABEL[task.status]}</span>
+            {kindCourse ? <span className="text-muted">{kindCourse}</span> : null}
             {overdue ? <span className="text-danger">Overdue</span> : null}
             {dueToday ? <span className="text-amber">Due today</span> : null}
           </p>
@@ -105,6 +109,7 @@ export function TaskCard({
               )}
             >
               {dueText}
+              {cadence ? ` · ${cadence}` : ""}
             </p>
             <div className="flex items-center gap-2">
               <button

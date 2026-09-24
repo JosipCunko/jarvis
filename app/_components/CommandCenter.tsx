@@ -1,13 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
-  BookOpen,
   Bot,
+  BotMessageSquare,
   Brain,
   CalendarDays,
   Cpu,
@@ -16,6 +16,7 @@ import {
   LogOut,
   Mail,
   Menu,
+  MessageCircle,
   MessageSquare,
   Mic,
   Paperclip,
@@ -36,13 +37,20 @@ import JarvisCore from "@/app/_components/JarvisCore";
 import JarvisMark from "@/app/_components/JarvisMark";
 import { VoiceBars } from "@/app/_components/voice-bars";
 import { AccountView } from "@/app/_components/AccountView";
+import { AgentsView } from "@/app/_components/AgentsView";
+import { AiCoreView } from "@/app/_components/AiCoreView";
 import { MemoryView } from "@/app/_components/MemoryView";
 import { TaskGlyph } from "@/app/_components/TaskGlyph";
 import { TasksView } from "@/app/_components/TasksView";
+import { ToolsView } from "@/app/_components/ToolsView";
+import { WeatherGlyph } from "@/app/_components/WeatherGlyph";
+import { WorkflowsView } from "@/app/_components/WorkflowsView";
 import { notifyError, notifyInfo, notifySuccess } from "@/app/_components/notify";
-import { looksLikeGenUi, readableFromGenUi, speakableReply } from "@/app/_lib/c1";
+import { looksLikeGenUi, readableFromGenUi, speakableReply, stoppedReplyText } from "@/app/_lib/c1";
+import { NEW_MISSION_PROMPT, missionKindLabel, repeatLabel } from "@/app/_lib/mission-repeat";
 import { signOut } from "@/app/_lib/auth-client";
 import { cn } from "@/app/_lib/cn";
+import { useLocalWeather } from "@/app/_lib/use-local-weather";
 import { useVoiceSession } from "@/app/_lib/use-voice-session";
 import { endOfToday, formatClock, formatDateLabel, formatWhen, startOfToday } from "@/app/_lib/time";
 import type { CreditsSnapshot } from "@/app/_types/credits";
@@ -57,33 +65,36 @@ import type {
 
 const C1Message = dynamic(() => import("./C1Message"), {
   ssr: false,
-  loading: () => <p className="text-sm text-muted">Composing interface…</p>,
+  loading: () => (
+    <p data-c1-pending="" className="text-sm text-muted">
+      Composing interface…
+    </p>
+  ),
 });
 
-type ActiveNav = "command" | "memory" | "conversations" | "settings" | "tasks";
+type ActiveNav = "command" | "core" | "agents" | "memory" | "conversations" | "settings" | "tasks" | "tools" | "workflows";
 
 const NAV = [
   { id: "command", label: "Command Center", icon: LayoutDashboard, live: true },
-  { id: "core", label: "AI Core", icon: Cpu, live: false },
-  { id: "agents", label: "Agents", icon: Bot, live: false, badge: "4" },
-  { id: "tasks", label: "Tasks", icon: ListChecks, live: true },
+  { id: "core", label: "AI Core", icon: Cpu, live: true },
+  { id: "agents", label: "Agents", icon: Bot, live: true, badge: "4" },
+  { id: "tasks", label: "Missions", icon: ListChecks, live: true },
   { id: "calendar", label: "Calendar", icon: CalendarDays, live: true, prompt: "Show my Google Calendar events from today through one month from today." },
   { id: "memory", label: "Memory", icon: Brain, live: true },
   { id: "conversations", label: "Conversations", icon: MessageSquare, live: true },
-  { id: "knowledge", label: "Knowledge Base", icon: BookOpen, live: false },
-  { id: "tools", label: "Tools & Skills", icon: Wrench, live: false },
-  { id: "workflows", label: "Workflows", icon: Workflow, live: false },
+  { id: "tools", label: "Tools & Skills", icon: Wrench, live: true },
+  { id: "workflows", label: "Workflows", icon: Workflow, live: true },
 ] as const;
 
 const AGENTS = [
   { name: "Research Agent", status: "Standby", tone: "cyan" },
   { name: "Memory Agent", status: "Ready", tone: "ok" },
-  { name: "Task Agent", status: "Ready", tone: "ok" },
+  { name: "Mission Agent", status: "Ready", tone: "ok" },
   { name: "System Agent", status: "Local offline", tone: "muted" },
 ] as const;
 
 const QUICK = [
-  { label: "Start New Task", prompt: "Help me create a new task. Ask me for the title and due date if needed." },
+  { label: "Start new mission", prompt: NEW_MISSION_PROMPT },
   { label: "Open Calendar", prompt: "Show my Google Calendar events from today through one month from today." },
   { label: "Start Voice Chat", prompt: "" },
 ] as const;
@@ -338,21 +349,26 @@ export default function CommandCenter({
   const reduceMotion = useReducedMotion();
   const sidebarId = useId();
   const abortRef = useRef<AbortController | null>(null);
+  const submitRequestRef = useRef(0);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const coreRef = useRef<HTMLElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [googleEmail, setGoogleEmail] = useState(initialGoogleEmail);
+  const { weather: footerWeather, message: weatherMessage } = useLocalWeather();
   const [credits, setCredits] = useState<CreditsSnapshot | null>(null);
   const [voiceChat, setVoiceChat] = useState(false);
+  const [speakReplies, setSpeakReplies] = useState(true);
   const [speaking, setSpeaking] = useState(false);
   const focusMode = useSyncExternalStore(subscribeFocus, focusSnapshot, () => false);
   const dictationBaseRef = useRef("");
   const voiceChatRef = useRef(false);
+  const speakRepliesRef = useRef(true);
   const pendingRef = useRef(false);
   const speakingRef = useRef(false);
   const playbackRef = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
+  const streamReaderRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const speakDoneRef = useRef<(() => void) | null>(null);
   const submitRef = useRef<
     (text: string, source?: "voice" | "typed" | "command") => void
@@ -360,6 +376,7 @@ export default function CommandCenter({
   const voicePhaseRef = useRef<"idle" | "listening" | "holding" | "transcribing">("idle");
 
   voiceChatRef.current = voiceChat;
+  speakRepliesRef.current = speakReplies;
   pendingRef.current = pending;
   speakingRef.current = speaking;
 
@@ -374,7 +391,7 @@ export default function CommandCenter({
     speakDoneRef.current = null;
   }, []);
 
-  const playSpeech = useCallback(async (text: string) => {
+  const playSpeech = useCallback(async (text: string, signal?: AbortSignal) => {
     const spoken = speakableReply(text);
     if (!spoken) throw new Error("Nothing to speak.");
     stopPlayback();
@@ -382,6 +399,7 @@ export default function CommandCenter({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: spoken }),
+      signal,
     });
     if (!response.ok) {
       const data = (await response.json().catch(() => null)) as {
@@ -527,11 +545,6 @@ export default function CommandCenter({
     void refreshGoogle();
   }, []);
 
-  useEffect(() => {
-    const node = scrollerRef.current;
-    if (!node) return;
-    node.scrollTop = node.scrollHeight;
-  }, [messages, streaming]);
 
   const tasks = snapshot.tasks;
   const activeTasks = tasks.filter((task) => task.status !== "done");
@@ -546,6 +559,7 @@ export default function CommandCenter({
   const memoryCount = snapshot.memories.length;
   const systemStatus = overdue.length ? "ATTENTION" : "OPTIMAL";
   const voiceLive = listening || voiceChat || speaking;
+  const generating = pending || speaking;
 
   async function refreshMissions() {
     const response = await fetch("/api/missions");
@@ -637,11 +651,21 @@ export default function CommandCenter({
     );
   }
 
-  async function submit(text: string, source: "voice" | "typed" | "command" = "command") {
+  async function submit(
+    text: string,
+    source: "voice" | "typed" | "command" = "command",
+    options?: { fresh?: boolean },
+  ) {
     const content = text.trim();
-    const files = attachments;
-    if ((!content && files.length === 0) || pending) return;
-    const speakThis = speechCloud && (source === "voice" || (source === "typed" && voiceChatRef.current));
+    const fresh = options?.fresh === true;
+    const files = fresh ? [] : attachments;
+    if ((!content && files.length === 0) || (pending && !fresh)) return;
+    const requestId = ++submitRequestRef.current;
+    if (fresh) {
+      abortRef.current?.abort();
+      setChatId(null);
+      setStreaming("");
+    }
     const userMessage: ChatMessage = {
       role: "user",
       content:
@@ -649,19 +673,24 @@ export default function CommandCenter({
         `Please use the attached image${files.length === 1 ? "" : "s"}.`,
       ...(files.length ? { attachments: files } : {}),
     };
-    const nextMessages: ChatMessage[] = [...messages, userMessage];
+    const nextMessages: ChatMessage[] = [...(fresh ? [] : messages), userMessage];
+    const activeChatId = fresh ? null : chatId;
     setMessages(nextMessages);
     setInput("");
     setAttachments([]);
     setPending(true);
     setStreaming("");
     abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
+    let accumulated = "";
+    let results: FunctionResult[] | undefined;
+    let settled = false;
     try {
       const response = await fetch("/api/ai/thesys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages, chatId }),
-        signal: abortRef.current.signal,
+        body: JSON.stringify({ messages: nextMessages, chatId: activeChatId }),
+        signal,
       });
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
@@ -670,9 +699,8 @@ export default function CommandCenter({
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       if (!reader) throw new Error("No response body");
-      let accumulated = "";
+      streamReaderRef.current = reader;
       let leftover = "";
-      let results: FunctionResult[] | undefined;
       while (true) {
         const { done, value } = await reader.read();
         leftover += decoder.decode(value ?? new Uint8Array(), { stream: !done });
@@ -704,19 +732,22 @@ export default function CommandCenter({
         }
         if (done) break;
       }
+      if (signal.aborted) throw new DOMException("Stopped", "AbortError");
       setMessages([
         ...nextMessages,
         { role: "assistant", content: accumulated, functionResults: results },
       ]);
+      settled = true;
       setStreaming("");
       void refreshThreads();
       void refreshMissions();
       router.refresh();
-      if (speakThis && accumulated.trim()) {
+      if (speechCloud && speakRepliesRef.current && speakableReply(accumulated)) {
         setSpeaking(true);
         try {
-          await playSpeech(accumulated);
+          await playSpeech(accumulated, signal);
         } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") throw error;
           notifyError(
             error instanceof Error ? error.message : "JARVIS could not speak that reply.",
           );
@@ -725,12 +756,26 @@ export default function CommandCenter({
         }
       }
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") return;
+      if (requestId !== submitRequestRef.current) return;
+      if (error instanceof Error && error.name === "AbortError") {
+        const kept = settled ? null : stoppedReplyText(accumulated);
+        if (kept) {
+          setMessages([
+            ...nextMessages,
+            { role: "assistant", content: kept, functionResults: results },
+          ]);
+        }
+        setStreaming("");
+        setSpeaking(false);
+        return;
+      }
       const message =
         error instanceof Error ? error.message : "JARVIS could not reply";
       setMessages([...nextMessages, { role: "assistant", content: message }]);
       notifyError(message);
     } finally {
+      streamReaderRef.current = null;
+      if (requestId !== submitRequestRef.current) return;
       setPending(false);
       setResearching(false);
       abortRef.current = null;
@@ -740,6 +785,16 @@ export default function CommandCenter({
   submitRef.current = (text, source) => {
     void submit(text, source);
   };
+
+  function stopGeneration() {
+    const reader = streamReaderRef.current;
+    streamReaderRef.current = null;
+    abortRef.current?.abort();
+    void reader?.cancel(new DOMException("Stopped", "AbortError")).catch(() => {});
+    stopPlayback();
+    setSpeaking(false);
+    setResearching(false);
+  }
 
   function endListening() {
     setVoiceChat(false);
@@ -789,10 +844,14 @@ export default function CommandCenter({
   }, [pending, speaking, voiceChat, listening, cancelVoice, startVoice]);
 
   function startNewConversation() {
+    submitRequestRef.current += 1;
     abortRef.current?.abort();
     setChatId(null);
     setMessages([]);
     setStreaming("");
+    setInput("");
+    setAttachments([]);
+    dictationBaseRef.current = "";
     setActiveNav("command");
     inputRef.current?.focus();
   }
@@ -843,7 +902,16 @@ export default function CommandCenter({
 
   function onNav(id: string, prompt?: string) {
     closeSidebar();
-    if (id === "command" || id === "memory" || id === "conversations" || id === "tasks") {
+    if (
+      id === "command" ||
+      id === "core" ||
+      id === "agents" ||
+      id === "memory" ||
+      id === "conversations" ||
+      id === "tasks" ||
+      id === "tools" ||
+      id === "workflows"
+    ) {
       setActiveNav(id);
       return;
     }
@@ -1016,14 +1084,44 @@ export default function CommandCenter({
             "hud-grid min-h-0 flex-1 p-3 lg:p-4",
             focusMode &&
             activeNav !== "settings" &&
+            activeNav !== "core" &&
+            activeNav !== "agents" &&
             activeNav !== "tasks" &&
             activeNav !== "memory" &&
-            activeNav !== "conversations"
+            activeNav !== "conversations" &&
+            activeNav !== "tools" &&
+            activeNav !== "workflows"
               ? "flex flex-col overflow-hidden pb-0 lg:pb-0"
               : "overflow-y-auto",
           )}
         >
-          {activeNav === "memory" ? (
+          {activeNav === "tools" ? (
+            <ToolsView />
+          ) : activeNav === "agents" ? (
+            <AgentsView
+              memories={snapshot.memories}
+              tasks={snapshot.tasks}
+              researching={researching}
+              onOpenMemory={() => setActiveNav("memory")}
+              onOpenTasks={() => setActiveNav("tasks")}
+            />
+          ) : activeNav === "core" ? (
+            <AiCoreView
+              credits={credits}
+              memories={snapshot.memories}
+              tasks={snapshot.tasks}
+              listening={listening}
+              speaking={speaking}
+              holding={holding}
+              voiceChat={voiceChat}
+              speechReady={speechReady}
+              speechSupported={speechSupported}
+              voiceLive={voiceLive}
+              analyserRef={analyserRef}
+              onOpenMemory={() => setActiveNav("memory")}
+              onOpenTasks={() => setActiveNav("tasks")}
+            />
+          ) : activeNav === "memory" ? (
             <MemoryView
               memories={snapshot.memories}
               onChanged={() => void refreshMissions()}
@@ -1059,6 +1157,16 @@ export default function CommandCenter({
               onAskJarvis={(prompt) => {
                 setActiveNav("command");
                 void submit(prompt);
+              }}
+            />
+          ) : activeNav === "workflows" ? (
+            <WorkflowsView
+              googleConfigured={googleConfigured}
+              weather={footerWeather}
+              weatherMessage={weatherMessage}
+              onAskJarvis={(prompt) => {
+                setActiveNav("command");
+                void submit(prompt, "command", { fresh: true });
               }}
             />
           ) : activeNav === "conversations" ? (
@@ -1251,6 +1359,23 @@ export default function CommandCenter({
             >
               <Mic size={18} className={voiceLive ? "animate-[jarvis-pulse_1.2s_ease-in-out_infinite]" : undefined} />
             </Button>
+            <Button
+              shape="pill"
+              title={speakReplies ? "JARVIS microphone is on" : "JARVIS microphone is off"}
+              aria-label={speakReplies ? "Turn off the JARVIS microphone" : "Turn on the JARVIS microphone"}
+              aria-pressed={speakReplies}
+              active={speakReplies}
+              onClick={() => {
+                if (speakReplies) {
+                  stopPlayback();
+                  setSpeaking(false);
+                }
+                setSpeakReplies((on) => !on);
+              }}
+            >
+              <BotMessageSquare size={16} />
+              <Mic size={11} aria-hidden />
+            </Button>
             <div className="min-w-0 flex-1 text-center">
               <p className="font-display text-[11px] tracking-[0.35em] text-cyan">
                 {listening ? "LISTENING" : speaking ? "SPEAKING" : voiceChat ? "VOICE CHAT" : "TALK TO JARVIS"}
@@ -1278,6 +1403,15 @@ export default function CommandCenter({
                 className="w-full bg-transparent text-center text-sm text-ink outline-none placeholder:text-muted disabled:opacity-60"
               />
             </div>
+            {chatId || messages.length ? (
+              <Button
+                title="New conversation"
+                aria-label="New conversation"
+                onClick={startNewConversation}
+              >
+                <Plus size={16} />
+              </Button>
+            ) : null}
             <Button
               title="Attach image"
               aria-label="Attach image"
@@ -1286,20 +1420,34 @@ export default function CommandCenter({
               <Paperclip size={16} />
             </Button>
             <Button
-              type="submit"
+              type={generating ? "button" : "submit"}
               variant="solid"
-              disabled={pending}
-              aria-label="Send"
-              title="Talk to JARVIS"
+              aria-label={generating ? "Stop JARVIS" : "Send"}
+              title={generating ? "Stop" : "Talk to JARVIS"}
+              onClick={generating ? stopGeneration : undefined}
             >
-              <Play size={16} fill="currentColor" />
+              {generating ? (
+                <span aria-hidden className="block size-3.5 bg-black" />
+              ) : (
+                <Play size={16} fill="currentColor" />
+              )}
             </Button>
             </div>
           </div>
         </form>
 
-        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line px-4 py-2 font-mono text-[10px] tracking-widest text-muted lg:px-6">
-          <span>LOCATION · LOCAL NODE</span>
+        <footer className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-line px-4 py-2 font-mono text-[10px] tracking-widest text-muted lg:px-6">
+          {footerWeather ? (
+            <span className="flex min-w-0 items-center gap-1 text-cyan">
+              <WeatherGlyph code={footerWeather.code} isDay={footerWeather.isDay} size={12} />
+              <span className="truncate uppercase">
+                {footerWeather.place ? `${footerWeather.place} ` : ""}
+                {footerWeather.temperature}° {footerWeather.label}
+              </span>
+            </span>
+          ) : (
+            <span />
+          )}
           <span>NETWORK · {thesysReady ? "THESYS LINKED" : "LOCAL FALLBACK"}</span>
           <span>GOOGLE · {googleEmail ? "GMAIL + CALENDAR" : googleConfigured ? "NOT LINKED" : "UNCONFIGURED"}</span>
         </footer>
@@ -1400,6 +1548,95 @@ function AiCore({
   onAction: (text: string) => void;
 }) {
   const hasChat = messages.length > 0 || Boolean(streaming);
+  const scrollChatRef = useRef<() => void>(() => {});
+  const onAssistantLayout = useCallback(() => {
+    scrollChatRef.current();
+  }, []);
+
+  useLayoutEffect(() => {
+    const node = scrollerRef.current;
+    if (!node) return;
+
+    let pinned = true;
+    const stick = () => {
+      if (!pinned) return;
+      const max = node.scrollHeight - node.clientHeight;
+      if (max <= 0 || node.scrollTop >= max - 1) return;
+      node.scrollTop = node.scrollHeight;
+    };
+    scrollChatRef.current = stick;
+    const release = () => {
+      if (node.querySelector("[data-c1-pending]")) return;
+      pinned = false;
+    };
+    const onScroll = () => {
+      const distance = node.scrollHeight - node.clientHeight - node.scrollTop;
+      if (distance < 48) pinned = true;
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const scrollbar = node.offsetWidth - node.clientWidth;
+      if (scrollbar <= 0) return;
+      const rect = node.getBoundingClientRect();
+      if (event.clientX >= rect.right - scrollbar) release();
+    };
+
+    let queued = false;
+    const queueStick = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        stick();
+      });
+    };
+
+    const observer = new ResizeObserver(() => queueStick());
+    for (const child of node.children) observer.observe(child);
+
+    const mutations = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const added of record.addedNodes) {
+          if (added instanceof Element && added.parentElement === node) observer.observe(added);
+        }
+      }
+      queueStick();
+    });
+    mutations.observe(node, { childList: true });
+
+    stick();
+    const started = performance.now();
+    let settledFrames = 0;
+    let frame = 0;
+    const follow = () => {
+      stick();
+      if (!pinned) return;
+      const pending = node.querySelector("[data-c1-pending]");
+      if (pending && performance.now() - started < 20000) {
+        settledFrames = 0;
+        frame = requestAnimationFrame(follow);
+        return;
+      }
+      settledFrames += 1;
+      if (settledFrames < 60) frame = requestAnimationFrame(follow);
+    };
+    frame = requestAnimationFrame(follow);
+    node.addEventListener("wheel", release, { passive: true });
+    node.addEventListener("touchmove", release, { passive: true });
+    node.addEventListener("pointerdown", onPointerDown);
+    node.addEventListener("scroll", onScroll, { passive: true });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      if (scrollChatRef.current === stick) scrollChatRef.current = () => {};
+      node.removeEventListener("wheel", release);
+      node.removeEventListener("touchmove", release);
+      node.removeEventListener("pointerdown", onPointerDown);
+      node.removeEventListener("scroll", onScroll);
+      observer.disconnect();
+      mutations.disconnect();
+    };
+  }, [messages, streaming, scrollerRef]);
+
   return (
     <section
       ref={coreRef}
@@ -1414,6 +1651,7 @@ function AiCore({
       {hasChat ? (
         <div
           ref={scrollerRef}
+          style={{ overflowAnchor: "none" }}
           className={cn(
             "relative z-10 space-y-3 overflow-y-auto pr-1",
             focus ? "h-full" : "max-h-112",
@@ -1424,6 +1662,7 @@ function AiCore({
               key={`${message.role}-${index}`}
               message={message}
               onAction={onAction}
+              onLayout={onAssistantLayout}
             />
           ))}
           {streaming ? (
@@ -1431,6 +1670,7 @@ function AiCore({
               message={{ role: "assistant", content: streaming }}
               streaming
               onAction={onAction}
+              onLayout={onAssistantLayout}
             />
           ) : null}
           {pending && !streaming ? (
@@ -1707,6 +1947,9 @@ function TimelineItem({
   onDelete: () => void;
 }) {
   const overdue = task.status !== "done" && task.dueAt != null && task.dueAt < startOfToday();
+  const detail = [missionKindLabel(task.kind), task.course, repeatLabel(task.repeat)]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <li className="flex items-start gap-2 text-sm">
       <TaskGlyph title={task.title} icon={task.icon} color={task.color} size={14} />
@@ -1722,6 +1965,7 @@ function TimelineItem({
         >
           {task.status === "done" ? "complete" : task.status.replace("_", " ")}
           {task.dueAt ? ` · ${formatWhen(task.dueAt)}` : ""}
+          {detail ? ` · ${detail}` : ""}
         </p>
       </div>
       <button
@@ -1788,7 +2032,9 @@ type LinkItem = {
   statusLabel?: string;
   icon: typeof Sparkles;
   connectHref?: string;
+  onConnect?: () => void;
   onDisconnect?: () => void;
+  qr?: string | null;
 };
 
 function googleLinkStatus(configured: boolean, email: string | null): LinkTone {
@@ -1823,6 +2069,97 @@ function LinkStatus({
   googleEmail: string | null;
   onDisconnectGoogle: () => void;
 }) {
+  const [whatsapp, setWhatsapp] = useState<{
+    connected: boolean;
+    phone: string | null;
+    qr: string | null;
+  }>({ connected: false, phone: null, qr: null });
+  const [whatsappBusy, setWhatsappBusy] = useState(false);
+
+  const refreshWhatsApp = useCallback(async () => {
+    const response = await fetch("/api/whatsapp/status");
+    if (!response.ok) return null;
+    const data = (await response.json()) as {
+      connected?: boolean;
+      phone?: string | null;
+      qr?: string | null;
+    };
+    const next = {
+      connected: Boolean(data.connected),
+      phone: data.phone ?? null,
+      qr: data.qr ?? null,
+    };
+    setWhatsapp(next);
+    return next;
+  }, []);
+
+  const pairingRef = useRef(false);
+
+  useEffect(() => {
+    void refreshWhatsApp();
+  }, [refreshWhatsApp]);
+
+  useEffect(() => {
+    if (whatsapp.qr) pairingRef.current = true;
+    if (whatsapp.connected && pairingRef.current) {
+      pairingRef.current = false;
+      notifySuccess("WhatsApp connected");
+    }
+  }, [whatsapp.connected, whatsapp.qr]);
+
+  useEffect(() => {
+    if (whatsapp.connected || !whatsapp.qr) return;
+    const id = window.setInterval(() => {
+      void refreshWhatsApp();
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [refreshWhatsApp, whatsapp.connected, whatsapp.qr]);
+
+  async function connectWhatsApp() {
+    setWhatsappBusy(true);
+    try {
+      const response = await fetch("/api/whatsapp/connect", { method: "POST" });
+      const data = (await response.json().catch(() => null)) as {
+        connected?: boolean;
+        phone?: string | null;
+        qr?: string | null;
+        error?: string | { message?: string } | null;
+      } | null;
+      if (!response.ok || !data) {
+        notifyError("Could not start WhatsApp linking");
+        return;
+      }
+      const message =
+        typeof data.error === "string" ? data.error : data.error?.message;
+      if (!data.connected && !data.qr) {
+        notifyError(message || "Could not start WhatsApp linking");
+      }
+      setWhatsapp({
+        connected: Boolean(data.connected),
+        phone: data.phone ?? null,
+        qr: data.qr ?? null,
+      });
+      if (data.connected) notifySuccess("WhatsApp connected");
+    } finally {
+      setWhatsappBusy(false);
+    }
+  }
+
+  async function disconnectWhatsApp() {
+    setWhatsappBusy(true);
+    try {
+      const response = await fetch("/api/whatsapp/disconnect", { method: "POST" });
+      if (!response.ok) {
+        notifyError("Could not disconnect WhatsApp");
+        return;
+      }
+      setWhatsapp({ connected: false, phone: null, qr: null });
+      notifySuccess("WhatsApp disconnected");
+    } finally {
+      setWhatsappBusy(false);
+    }
+  }
+
   const google = googleLinkStatus(googleConfigured, googleEmail);
   const googleDetail =
     googleEmail ?? (googleConfigured ? "Click Connect to link" : "Set GOOGLE_CLIENT_ID");
@@ -1873,6 +2210,21 @@ function LinkStatus({
       icon: Mail,
       ...googleAction,
     },
+    {
+      id: "whatsapp",
+      name: "WhatsApp",
+      detail: whatsapp.connected
+        ? (whatsapp.phone ?? "Linked device")
+        : whatsapp.qr
+          ? "Scan the QR to link"
+          : "Click Connect to link",
+      status: whatsapp.connected ? "connected" : "not_linked",
+      icon: MessageCircle,
+      ...(whatsapp.connected
+        ? { onDisconnect: () => void disconnectWhatsApp() }
+        : { onConnect: () => void connectWhatsApp() }),
+      qr: whatsapp.qr,
+    },
   ];
 
   return (
@@ -1883,8 +2235,9 @@ function LinkStatus({
           return (
             <li
               key={link.id}
-              className="flex items-center justify-between gap-3 rounded-lg border border-line/70 px-3 py-3"
+              className="rounded-lg border border-line/70 px-3 py-3"
             >
+              <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-2">
                 <Icon size={14} className="text-cyan" />
                 <div className="min-w-0">
@@ -1907,11 +2260,22 @@ function LinkStatus({
                     Connect
                   </Button>
                 ) : null}
+                {link.onConnect ? (
+                  <Button
+                    shape="pill"
+                    size="sm"
+                    disabled={whatsappBusy}
+                    onClick={link.onConnect}
+                  >
+                    Connect
+                  </Button>
+                ) : null}
                 {link.onDisconnect ? (
                   <Button
                     shape="pill"
                     size="sm"
                     tone="danger"
+                    disabled={link.id === "whatsapp" && whatsappBusy}
                     onClick={link.onDisconnect}
                   >
                     Disconnect
@@ -1929,6 +2293,19 @@ function LinkStatus({
                   {link.statusLabel ?? linkStatusLabel(link.status)}
                 </span>
               </div>
+              </div>
+              {link.qr ? (
+                <div className="mt-3 flex flex-col items-start gap-2">
+                  <img
+                    src={link.qr}
+                    alt="WhatsApp QR code"
+                    className="h-40 w-40 rounded-lg bg-white p-2"
+                  />
+                  <p className="font-mono text-[10px] tracking-widest text-muted">
+                    WhatsApp → Linked devices → Link a device
+                  </p>
+                </div>
+              ) : null}
             </li>
           );
         })}
@@ -1941,10 +2318,12 @@ function MessageBubble({
   message,
   streaming = false,
   onAction,
+  onLayout,
 }: {
   message: ChatMessage;
   streaming?: boolean;
   onAction?: (text: string) => void;
+  onLayout?: () => void;
 }) {
   const isUser = message.role === "user";
   const genUi = !isUser && looksLikeGenUi(message.content);
@@ -1986,6 +2365,7 @@ function MessageBubble({
             content={message.content}
             isStreaming={streaming}
             onAction={onAction}
+            onLayout={onLayout}
           />
         ) : (
           <p className="whitespace-pre-wrap break-words">

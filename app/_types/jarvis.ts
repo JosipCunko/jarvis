@@ -1,6 +1,22 @@
 export type TaskStatus = "open" | "in_progress" | "done";
 export type TaskPriority = "low" | "medium" | "high";
+export type MissionKind =
+  | "assignment"
+  | "exam"
+  | "class"
+  | "study"
+  | "reading"
+  | "project"
+  | "errand";
+export type RepeatFrequency = "daily" | "weekly" | "weekdays";
 export type AuthProvider = "firebase" | "demo";
+
+export interface MissionRepeat {
+  frequency: RepeatFrequency;
+  interval: number;
+  weekdays?: number[];
+  until?: number;
+}
 
 export interface AppUser {
   uid: string;
@@ -22,9 +38,18 @@ export interface Task {
   notes?: string;
   icon?: string;
   color?: string;
+  kind?: MissionKind;
+  course?: string;
+  repeat?: MissionRepeat;
+  seriesId?: string;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
+}
+
+export interface MissionCompletion {
+  task: Task;
+  next: Task | null;
 }
 
 export interface TaskInput {
@@ -37,6 +62,10 @@ export interface TaskInput {
   notes?: string;
   icon?: string;
   color?: string;
+  kind?: MissionKind | null;
+  course?: string | null;
+  repeat?: MissionRepeat | null;
+  seriesId?: string;
 }
 
 export interface TaskFilter {
@@ -100,7 +129,7 @@ export interface MissionStore {
   getUser(userId: string): Promise<AppUser | null>;
   listTasks(userId: string, filter?: TaskFilter): Promise<Task[]>;
   upsertTask(userId: string, task: TaskInput): Promise<Task>;
-  completeTask(userId: string, id: string): Promise<Task>;
+  completeTask(userId: string, id: string): Promise<MissionCompletion>;
   deleteTask(userId: string, id: string): Promise<void>;
   rescheduleTask(userId: string, id: string, dueAt: number): Promise<Task>;
   remember(userId: string, text: string): Promise<MemoryNote>;

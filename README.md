@@ -8,15 +8,25 @@ Personal operator dashboard: missions, memory, and a streaming AI core with gene
 
 Talk in the **Talk to JARVIS** bar (or use Quick Commands / sidebar prompts). With a Thesys API key, replies stream in and can render as cards, lists, and timelines instead of a wall of text. Without the key, JARVIS still answers locally with a briefing or recalled notes.
 
-### Missions (tasks)
+### Missions
 
-A mission is a task stored for the signed-in operator. A Firebase account and the demo operator do not share missions, so work created on one does not appear on the other.
+A mission is one piece of work for the signed-in operator: an assignment, study block, reading, project, or errand. It can name a course, a due date, a priority, notes, and tags. A lecture, class, lab, or exam sitting goes on Google Calendar, not this board. Say you want it as a mission, or pick **Recurring class or lab**, when you want that class on the board. Homework and study for the course stay missions.
 
-- **Tasks** in the sidebar opens the mission board: pending and completed, with search and Start / Complete / Reopen.
-- The command center **mission timeline** is the same list, trimmed to active work plus a few completed ones. **Board** on that panel opens Tasks.
-- JARVIS picks an icon and color from `app/_lib/task-appearance.ts` when he creates one. You can also ask him to complete or reschedule a mission by name.
+JARVIS creates and updates the plan. You read the same list, and you complete or delete from the board. You can also tell him a mission is finished ("I finished the essay", "gotov esej") and he will mark that one done. He cannot delete one.
 
-The HUD also shows system status and a live intelligence feed of overdue and due-soon missions.
+**Missions** in the sidebar opens the board: pending and completed, with search, Start, Complete, and Reopen. There is no create form. **New mission** and **Start new mission** ask JARVIS to show the ways to add one. The command center **mission timeline** is the same list, trimmed to active work plus a few completed ones.
+
+Ask him in the Talk bar in any of three ways:
+
+- Name the work and when it is due, and he creates it. A sentence of several obligations ("today I have to go to the gym and do the shopping", or the Croatian equivalent) becomes one mission each.
+- Say only that you want a new mission, and he shows a card of options: assignment, exam and a study plan, recurring class or lab, study block, reading, project, a today or tomorrow list, or an errand. Pick one and he asks only for what is still missing.
+- Ask him to plan a week or prepare for an exam that is still ahead. He proposes the set, including which sessions repeat, and creates them after you confirm.
+
+He picks an icon and color from `app/_lib/task-appearance.ts` when he creates one. You can ask him to rename, move a due date, change the course, or stop a repeat.
+
+A mission can repeat daily, on weekdays, or weekly on chosen days, until an optional end date. Completing it closes that occurrence and opens the next one after today, so a late complete does not pile up the days you missed. If the repeat has already ended, nothing new is added. Deleting the open card stops the series. Older completed cards stay until you delete them too.
+
+The HUD also shows system status and a live intelligence feed of overdue and due-soon missions. Asking what to do loads the same briefing: overdue, due today, and in progress.
 
 ### Memory
 
@@ -37,10 +47,22 @@ Header search asks JARVIS to look across missions and memory.
 
 After you click **Connect Google** in Link status, JARVIS can:
 
-- Create calendar events and reminders
+- Create calendar events and reminders. A lecture, class, lab, seminar, or exam sitting goes here. If Google is not connected, JARVIS says so instead of putting that event on the mission board.
 - List upcoming Google Calendar events
 - List and read Gmail
 - Send email, including images pasted or attached in the Talk bar
+
+### WhatsApp
+
+Click **Connect** on WhatsApp in Link status and scan the QR from the phone that owns the account (Linked devices). The same signed-in account shares that session on every phone. When the session is live, Link status says **Connected** and shows the number.
+
+JARVIS can then:
+
+- Read WhatsApp messages, including unread ones
+- Look up contacts
+- Send a message to a contact, including images pasted or attached in the Talk bar
+
+Workflows shows the unread WhatsApp count directly under the Gmail unread card.
 
 ### Voice
 
