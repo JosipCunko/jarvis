@@ -1,12 +1,14 @@
+import { subMonths } from "date-fns";
 import type { ChatMessage, ChatThread } from "@/app/_types/jarvis";
 
-export type NoiseReason = "empty" | "greeting" | "gibberish" | "test-prompt";
+export type NoiseReason = "empty" | "greeting" | "gibberish" | "test-prompt" | "stale";
 
 export const NOISE_REASON_LABEL: Record<NoiseReason, string> = {
   empty: "Empty thread",
   greeting: "Just a greeting",
   gibberish: "Nothing to keep",
   "test-prompt": "Test prompt",
+  stale: "Not used in a month",
 };
 
 const GREETINGS = new Set([
@@ -214,4 +216,25 @@ export function disposableChatReason(thread: Pick<ChatThread, "messages">): Nois
 
   if (kinds.some((kind) => kind === "gibberish")) return "gibberish";
   return "greeting";
+}
+
+/** Last update is a month ago or older. A recent edit keeps the thread. */
+export function staleChatReason(
+  thread: Pick<ChatThread, "updatedAt">,
+  now = Date.now(),
+): "stale" | null {
+  const updatedAt = thread.updatedAt;
+  if (typeof updatedAt !== "number" || !Number.isFinite(updatedAt) || updatedAt <= 0) {
+    return "stale";
+  }
+  const cutoff = subMonths(now, 1).getTime();
+  return updatedAt <= cutoff ? "stale" : null;
+}
+
+/** Noise threads, plus anything last updated a month ago or longer. */
+export function cleanupChatReason(
+  thread: Pick<ChatThread, "messages" | "updatedAt">,
+  now = Date.now(),
+): NoiseReason | null {
+  return disposableChatReason(thread) ?? staleChatReason(thread, now);
 }

@@ -7,13 +7,16 @@ import { adminDb } from "./admin";
 import { isFirebaseAdminConfigured } from "./config";
 import { nextRepeatDue, normalizeRepeat } from "./mission-repeat";
 import { resolveTaskAppearance } from "./task-appearance";
+import { normalizeMemoryText } from "./memory";
 import { parseWhen, startOfToday } from "./time";
 import type {
   AppUser,
   ChatMessage,
   ChatThread,
   GoogleAccount,
+  MemoryKind,
   MemoryNote,
+  MemoryPatch,
   MissionCompletion,
   MissionKind,
   MissionRepeat,
@@ -344,12 +347,50 @@ class FirestoreMissionStore implements MissionStore {
     return task;
   }
 
-  async remember(userId: string, text: string) {
+  async remember(userId: string, text: string, kind?: MemoryKind) {
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error("Note text is required.");
+    if (trimmed.length > 500) throw new Error("Keep the note under 500 characters.");
+    const now = Date.now();
+    const notes = await this.listMemories(userId);
+    const key = normalizeMemoryText(trimmed);
+    const existing = notes.find((note) => normalizeMemoryText(note.text) === key);
+    if (existing) {
+      const note: MemoryNote = {
+        ...existing,
+        text: trimmed,
+        kind: kind ?? existing.kind ?? "fact",
+        pinned: existing.pinned ?? false,
+        updatedAt: now,
+      };
+      await setCollectionDoc("memories", note);
+      return note;
+    }
     const note: MemoryNote = {
       id: randomUUID(),
       userId,
-      text: text.trim(),
-      createdAt: Date.now(),
+      text: trimmed,
+      kind: kind ?? "fact",
+      pinned: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await setCollectionDoc("memories", note);
+    return note;
+  }
+
+  async updateMemory(userId: string, id: string, patch: MemoryPatch) {
+    const existing = await getCollectionDoc("memories", userId, id);
+    if (!existing) throw new Error("Memory not found.");
+    const text = patch.text !== undefined ? patch.text.trim() : existing.text;
+    if (!text) throw new Error("Note text is required.");
+    if (text.length > 500) throw new Error("Keep the note under 500 characters.");
+    const note: MemoryNote = {
+      ...existing,
+      text,
+      kind: patch.kind ?? existing.kind ?? "fact",
+      pinned: patch.pinned ?? existing.pinned ?? false,
+      updatedAt: Date.now(),
     };
     await setCollectionDoc("memories", note);
     return note;
@@ -370,6 +411,13 @@ class FirestoreMissionStore implements MissionStore {
   async forgetMemory(userId: string, id: string) {
     const removed = await deleteCollectionDoc("memories", userId, id);
     if (!removed) throw new Error("Memory not found.");
+  }
+
+  async forgetStaleMemories(userId: string, olderThan: number) {
+    const notes = await this.listMemories(userId);
+    const stale = notes.filter((note) => !note.pinned && note.createdAt < olderThan);
+    await Promise.all(stale.map((note) => deleteCollectionDoc("memories", userId, note.id)));
+    return stale.length;
   }
 
   async listChatThreads(userId: string) {
@@ -521,6 +569,7 @@ class FirestoreMissionStore implements MissionStore {
     await this.remember(
       userId,
       "Prefer generative UI cards over long text. Keep the cyan HUD language terse.",
+      "instruction",
     );
   }
 

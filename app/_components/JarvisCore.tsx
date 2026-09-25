@@ -138,7 +138,7 @@ export default function JarvisCore({
     <div
       className={cn(
         "pointer-events-none absolute inset-0 flex items-center justify-center transition-opacity duration-700",
-        dimmed ? "opacity-[0.16]" : "opacity-100",
+        dimmed ? "opacity-60" : "opacity-100",
         className,
       )}
     >

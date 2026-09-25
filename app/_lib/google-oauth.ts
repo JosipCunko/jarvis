@@ -159,7 +159,7 @@ export async function googleApi<T>(userId: string, url: string, init: RequestIni
   const account = await getFreshGoogleAccount(userId);
   if (!account) {
     throw new Error(
-      "Google Calendar and Gmail are not connected. Ask the operator to click Connect Google in the header.",
+      "Google Calendar and Gmail are not connected. Ask the operator to click Connect on Google Calendar or Google Gmail in Link status.",
     );
   }
   const headers = new Headers(init.headers);

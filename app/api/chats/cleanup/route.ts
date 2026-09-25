@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "crypto";
-import { disposableChatReason, type NoiseReason } from "@/app/_lib/chat-noise";
+import { cleanupChatReason, type NoiseReason } from "@/app/_lib/chat-noise";
 import { getMissionStore } from "@/app/_lib/mission-store";
 import { getApiUserId } from "@/app/_lib/session";
 import type { ChatThread } from "@/app/_types/jarvis";
@@ -29,7 +29,7 @@ function cronAuthorized(token: string) {
 function hitsFor(threads: ChatThread[]): CleanupHit[] {
   const hits: CleanupHit[] = [];
   for (const thread of threads) {
-    const reason = disposableChatReason(thread);
+    const reason = cleanupChatReason(thread);
     if (!reason) continue;
     hits.push({
       id: thread.id,

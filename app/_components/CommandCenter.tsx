@@ -352,6 +352,9 @@ export default function CommandCenter({
   const submitRequestRef = useRef(0);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const coreRef = useRef<HTMLElement | null>(null);
+  const mainRef = useRef<HTMLElement | null>(null);
+  const [chatCue, setChatCue] = useState(false);
+  const [chatReveal, setChatReveal] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -637,6 +640,55 @@ export default function CommandCenter({
     void addFiles(files);
   }
 
+  function conversationIsPrimary() {
+    if (activeNav !== "command") return false;
+    const node = coreRef.current;
+    const main = mainRef.current;
+    if (!node || !main) return false;
+    const mainRect = main.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    if (mainRect.height < 160) return false;
+    const topInPane = nodeRect.top - mainRect.top;
+    const bottomInPane = nodeRect.bottom - mainRect.top;
+    const visible = Math.max(
+      0,
+      Math.min(nodeRect.bottom, mainRect.bottom) - Math.max(nodeRect.top, mainRect.top),
+    );
+    return (
+      topInPane >= -24 &&
+      topInPane < 80 &&
+      bottomInPane > mainRect.height * 0.72 &&
+      visible > 160
+    );
+  }
+
+  function revealConversation() {
+    if (conversationIsPrimary()) return;
+    setActiveNav("command");
+    setChatCue(true);
+    setChatReveal((count) => count + 1);
+  }
+
+  useLayoutEffect(() => {
+    if (!chatReveal) return;
+    const node = coreRef.current;
+    if (!node) return;
+    node.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "end",
+    });
+  }, [chatReveal, reduceMotion]);
+
+  useEffect(() => {
+    if (activeNav !== "command") setChatCue(false);
+  }, [activeNav]);
+
+  useEffect(() => {
+    if (!chatCue || pending || speaking) return;
+    const id = window.setTimeout(() => setChatCue(false), 2200);
+    return () => window.clearTimeout(id);
+  }, [chatCue, pending, speaking]);
+
   async function openThread(id: string) {
     const response = await fetch(`/api/ai/thesys?id=${encodeURIComponent(id)}`);
     if (!response.ok) throw new Error("Could not load that conversation.");
@@ -660,6 +712,7 @@ export default function CommandCenter({
     const fresh = options?.fresh === true;
     const files = fresh ? [] : attachments;
     if ((!content && files.length === 0) || (pending && !fresh)) return;
+    revealConversation();
     const requestId = ++submitRequestRef.current;
     if (fresh) {
       abortRef.current?.abort();
@@ -1080,6 +1133,7 @@ export default function CommandCenter({
         </header>
 
         <main
+          ref={mainRef}
           className={cn(
             "hud-grid min-h-0 flex-1 p-3 lg:p-4",
             focusMode &&
@@ -1127,7 +1181,7 @@ export default function CommandCenter({
               onChanged={() => void refreshMissions()}
               onAskJarvis={() => {
                 setActiveNav("command");
-                void submit("Recall stored memories.");
+                void submit("What do you know about me?");
               }}
             />
           ) : activeNav === "settings" ? (
@@ -1230,8 +1284,10 @@ export default function CommandCenter({
               messages={messages}
               streaming={streaming}
               pending={pending}
+              speaking={speaking}
               scrollerRef={scrollerRef}
               focus={focusMode}
+              pointed={chatCue}
               onAction={(text) => void submit(text)}
             />
             {focusMode ? null : (
@@ -1291,7 +1347,7 @@ export default function CommandCenter({
         ) : null}
 
         <form
-          className="shrink-0 border-t border-line bg-hud-2/90 px-4 py-3 lg:px-8"
+          className="relative shrink-0 border-t border-line bg-hud-2/90 px-4 py-3 lg:px-8"
           onPaste={onPaste}
           onSubmit={(event) => {
             event.preventDefault();
@@ -1389,15 +1445,17 @@ export default function CommandCenter({
                 }}
                 onPaste={onPaste}
                 placeholder={
-                  pending || voicePhase === "transcribing"
-                    ? "Working…"
-                    : holding
-                      ? "Still listening…"
-                      : listening
-                        ? "Speak now…"
-                      : attachments.length
-                        ? "Add a message, then send…"
-                        : "I am listening…"
+                  speaking
+                    ? "Speaking…"
+                    : pending || voicePhase === "transcribing"
+                      ? "Working…"
+                      : holding
+                        ? "Still listening…"
+                        : listening
+                          ? "Speak now…"
+                        : attachments.length
+                          ? "Add a message, then send…"
+                          : "I am listening…"
                 }
                 disabled={pending}
                 className="w-full bg-transparent text-center text-sm text-ink outline-none placeholder:text-muted disabled:opacity-60"
@@ -1535,16 +1593,20 @@ function AiCore({
   messages,
   streaming,
   pending,
+  speaking,
   scrollerRef,
   focus = false,
+  pointed = false,
   onAction,
 }: {
   coreRef?: React.RefObject<HTMLElement | null>;
   messages: ChatMessage[];
   streaming: string;
   pending: boolean;
+  speaking: boolean;
   scrollerRef: React.RefObject<HTMLDivElement | null>;
   focus?: boolean;
+  pointed?: boolean;
   onAction: (text: string) => void;
 }) {
   const hasChat = messages.length > 0 || Boolean(streaming);
@@ -1641,13 +1703,17 @@ function AiCore({
     <section
       ref={coreRef}
       className={cn(
-        "relative overflow-hidden p-4",
+        "relative scroll-mb-14 overflow-hidden p-4",
+        pointed && "chat-point",
         focus
           ? "h-full min-h-0 rounded-none border-0 bg-[linear-gradient(180deg,rgba(7,21,37,0.92),rgba(4,14,26,0.88))] shadow-none"
           : "hud-panel min-h-96 rounded-xl",
       )}
     >
-      <JarvisCore dimmed={hasChat} scanning={pending} />
+      <JarvisCore dimmed={hasChat} scanning={pending && !speaking} />
+      {hasChat ? (
+        <div className="pointer-events-none absolute inset-0 z-[1] bg-hud/10 backdrop-blur-[3px]" />
+      ) : null}
       {hasChat ? (
         <div
           ref={scrollerRef}
@@ -1673,7 +1739,11 @@ function AiCore({
               onLayout={onAssistantLayout}
             />
           ) : null}
-          {pending && !streaming ? (
+          {speaking ? (
+            <p className="font-mono text-xs tracking-widest text-cyan">
+              JARVIS is speaking…
+            </p>
+          ) : pending && !streaming ? (
             <p className="font-mono text-xs tracking-widest text-cyan">
               JARVIS is thinking…
             </p>
@@ -1805,14 +1875,21 @@ function MemoryPanel({
 }: {
   memories: MissionSnapshot["memories"];
 }) {
+  const shown = [
+    ...memories.filter((note) => note.pinned),
+    ...memories.filter((note) => !note.pinned),
+  ].slice(0, 4);
   return (
     <Panel title="MEMORY INSIGHTS">
       {memories.length === 0 ? (
         <p className="text-sm text-muted">No stored notes yet. Ask JARVIS to remember something.</p>
       ) : (
         <ul className="space-y-2">
-          {memories.slice(0, 4).map((note) => (
+          {shown.map((note) => (
             <li key={note.id} className="text-sm text-ink/90">
+              {note.pinned ? (
+                <span className="mr-2 font-mono text-[10px] tracking-widest text-cyan">PIN</span>
+              ) : null}
               {note.text}
             </li>
           ))}
@@ -2332,10 +2409,10 @@ function MessageBubble({
       <div
         className={
           isUser
-            ? "max-w-[min(100%,36rem)] rounded-2xl bg-cyan px-4 py-3 text-sm text-hud"
+            ? "max-w-[min(100%,36rem)] bg-transparent px-1 py-1 text-sm text-cyan-2"
             : genUi
-              ? "w-full min-w-0 text-sm"
-              : "max-w-[min(100%,36rem)] rounded-2xl border border-line bg-hud/70 px-4 py-3 text-sm"
+              ? "w-full min-w-0 bg-transparent text-sm"
+              : "max-w-[min(100%,36rem)] bg-transparent px-1 py-1 text-sm text-ink"
         }
       >
         {isUser ? (

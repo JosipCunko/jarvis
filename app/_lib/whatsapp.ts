@@ -9,7 +9,7 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   jidNormalizedUser,
   toNumber,
-  useMultiFileAuthState,
+  useMultiFileAuthState as loadMultiFileAuthState,
   type Contact,
   type WAMessage,
   type WASocket,
@@ -293,7 +293,7 @@ async function startSocket(session: Session) {
   const generation = ++session.generation;
   try {
     await fs.mkdir(sessionDir(session.userId), { recursive: true });
-    const { state, saveCreds } = await useMultiFileAuthState(sessionDir(session.userId));
+    const { state, saveCreds } = await loadMultiFileAuthState(sessionDir(session.userId));
     const { version } = await fetchLatestBaileysVersion();
     if (session.generation !== generation || session.stopped) return;
     const sock = makeWASocket({
@@ -627,6 +627,26 @@ export async function readWhatsAppContacts(userId: string, query?: string) {
   return { count: contacts.length, contacts };
 }
 
+function operatorSpecifiedCaption(operatorText: string, caption: string) {
+  const source = operatorText.trim();
+  if (!source) return false;
+  const wanted = caption.trim().toLowerCase();
+  const sourceLower = source.toLowerCase();
+  const instructionWord = /^(image|picture|photo|pic|slika|sliku|slike|send|pošalji|posalji)$/i;
+  if (
+    wanted.length >= 2 &&
+    wanted !== sourceLower &&
+    !wanted.includes(sourceLower) &&
+    sourceLower.includes(wanted) &&
+    !instructionWord.test(wanted)
+  ) {
+    return true;
+  }
+  return /\b(say|saying|tell|write|caption|napiši|napisi|reci|kaži|kazi|poruka|uz tekst|with the (?:text|words|caption|message))\b/i.test(
+    source,
+  );
+}
+
 function attachmentFile(item: ChatAttachment) {
   const dataUrl = item.dataUrl || "";
   const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
@@ -640,6 +660,7 @@ export async function sendWhatsAppMessage(
   userId: string,
   input: { to?: string; text?: string; attach_chat_images?: boolean },
   attachments: ChatAttachment[] = [],
+  operatorText = "",
 ) {
   const session = await requireSession(userId);
   const sock = session.sock;
@@ -654,7 +675,6 @@ export async function sendWhatsAppMessage(
     if (!hit) throw new Error("That number is not on WhatsApp.");
     jid = hit.jid;
   }
-  const text = input.text?.trim() || "";
   const files =
     input.attach_chat_images === false
       ? []
@@ -662,6 +682,9 @@ export async function sendWhatsAppMessage(
           const file = attachmentFile(item);
           return file ? [file] : [];
         });
+  const requested = input.text?.trim() || "";
+  const text =
+    files.length > 0 && !operatorSpecifiedCaption(operatorText, requested) ? "" : requested;
   if (!text && files.length === 0) throw new Error("Write a message or attach an image.");
   if (files.length === 0) {
     await sock.sendMessage(jid, { text });

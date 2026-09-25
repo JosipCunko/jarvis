@@ -1,3 +1,4 @@
+import { parseMemoryKind } from "@/app/_lib/memory";
 import { getMissionStore } from "@/app/_lib/mission-store";
 import { getApiUserId } from "@/app/_lib/session";
 
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
   if (!userId) {
     return Response.json({ error: { message: "Sign in first." } }, { status: 401 });
   }
-  const body = (await request.json().catch(() => null)) as { text?: string } | null;
+  const body = (await request.json().catch(() => null)) as { text?: string; kind?: unknown } | null;
   const text = body?.text?.trim() ?? "";
   if (!text) {
     return Response.json({ error: { message: "Note text is required." } }, { status: 400 });
@@ -26,6 +27,9 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const memory = await getMissionStore().remember(userId, text);
+  if (body?.kind != null && body.kind !== "" && !parseMemoryKind(body.kind)) {
+    return Response.json({ error: { message: "Unknown note kind." } }, { status: 400 });
+  }
+  const memory = await getMissionStore().remember(userId, text, parseMemoryKind(body?.kind));
   return Response.json({ memory });
 }

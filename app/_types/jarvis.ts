@@ -75,11 +75,22 @@ export interface TaskFilter {
   query?: string;
 }
 
+export type MemoryKind = "fact" | "preference" | "instruction";
+
 export interface MemoryNote {
   id: string;
   userId: string;
   text: string;
   createdAt: number;
+  updatedAt?: number;
+  kind?: MemoryKind;
+  pinned?: boolean;
+}
+
+export interface MemoryPatch {
+  text?: string;
+  kind?: MemoryKind;
+  pinned?: boolean;
 }
 
 export interface FunctionResult {
@@ -132,10 +143,12 @@ export interface MissionStore {
   completeTask(userId: string, id: string): Promise<MissionCompletion>;
   deleteTask(userId: string, id: string): Promise<void>;
   rescheduleTask(userId: string, id: string, dueAt: number): Promise<Task>;
-  remember(userId: string, text: string): Promise<MemoryNote>;
+  remember(userId: string, text: string, kind?: MemoryKind): Promise<MemoryNote>;
+  updateMemory(userId: string, id: string, patch: MemoryPatch): Promise<MemoryNote>;
   recall(userId: string, query?: string): Promise<MemoryNote[]>;
   listMemories(userId: string): Promise<MemoryNote[]>;
   forgetMemory(userId: string, id: string): Promise<void>;
+  forgetStaleMemories(userId: string, olderThan: number): Promise<number>;
   listChats(userId: string): Promise<Pick<ChatThread, "id" | "title" | "updatedAt">[]>;
   listChatThreads(userId: string): Promise<ChatThread[]>;
   listAllChatThreads(): Promise<ChatThread[]>;

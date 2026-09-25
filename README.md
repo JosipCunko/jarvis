@@ -77,42 +77,43 @@ The sidebar bars follow your voice only when one of those keys is set. That path
 
 ## How memory and tool calling work
 
-A memory is a short note you save on purpose. It is not pasted into every prompt.
+Each Talk-bar turn loads your notes and adds a "Known about the operator" section to the system prompt. Pinned notes always go in. Newest unpinned notes follow until about 1,500 characters. Anything past that stays stored. Asking what is stored is answered from that block. JARVIS calls `recall` only to search for a specific subject that is not already listed. JARVIS follows instruction notes, applies preference notes, and treats fact notes as true unless you contradict them.
+`remember` stores a note and its kind, `forget` deletes one note when you ask
 
-Each note is `{ id, userId, text, createdAt }`. Notes live with the rest of your data:
+
+Each note is `{ id, userId, text, createdAt, updatedAt, kind, pinned }`. `kind` is `fact`, `preference`, or `instruction`. Older notes with no kind are treated as facts, and a missing pin means unpinned. Notes live with the rest of your data:
 
 - Firestore: `users/{userId}/memories/{id}` when the Admin SDK is configured
 - Otherwise: `.data/jarvis-memory.json`
 
-Two paths write the same record:
+Three paths write the same record:
 
 - The **Memory** tab calls `POST /api/memories`
-- Saying "remember this" in the Talk bar makes the model call the `remember` tool, which runs the same store method
+- Saying you want something remembered in the Talk bar makes the model call the `remember` tool, which runs the same store method. The prompt tells JARVIS to translate Croatian or English into that action, so the instruction does not list both phrasings.
+- The same normalized text updates the existing note instead of inserting a duplicate
+
+`PATCH /api/memories/[id]` changes text, kind, or pin. `DELETE` removes one note. **Clear notes older than 3 months** calls `POST /api/memories/cleanup` and deletes unpinned notes whose `createdAt` is at least three months old. Pinned notes stay. The `forget` tool deletes one note when you ask JARVIS to forget it.
 
 ### What a chat turn actually sends
 
 Every Talk-bar turn sends three things to Thesys:
 
-1. A fixed system prompt. It says missions, memories, Calendar, and Gmail live in tools, and that JARVIS should call those tools instead of inventing data. It does not contain your notes.
+1. A system prompt. After the operator's local time it includes a **Known about the operator** block built from pinned notes and recent unpinned notes. It tells JARVIS when to call `remember`, `recall`, and `forget`. It does not repeat tool triggers in both languages. One line says to translate the request, then follow the English instructions.
 2. The messages in the current conversation only.
-3. Tool definitions (`remember`, `recall`, mission tools, Calendar, Gmail) with `tool_choice: auto`.
+3. Tool definitions (`remember`, `recall`, `forget`, mission tools, Calendar, Gmail) with `tool_choice: auto`.
 
-Notes are loaded only if the model chooses to call `recall` on that turn. `recall` returns at most 8 notes, newest first. With a search string it keeps notes whose text contains that string. Those results are appended to that same turn as tool messages, and JARVIS answers from them. The next message does not include them again unless the model calls `recall` again.
+`recall` still returns at most 8 notes, newest first. With a search string it keeps notes whose text contains that string. Those results are appended to that same turn as tool messages. The next message does not include the search results again. The prompt block is rebuilt from the store on every turn, so a pin or a new note is present on the following message without another `recall`.
 
-Opening **Memory** does not go through the model. That view reads the store directly, so it can show every note, not just the 8 the tool returns.
-
-Saved conversations are separate. A thread is the chat transcript (`users/{userId}/chats`), not these notes. Starting a new conversation does not carry memory notes into the prompt.
+Saved conversations are separate. A thread is the chat transcript (`users/{userId}/chats`), not these notes. Starting a new conversation does not drop the memory block. The block is added again on the next turn.
 
 # Speech recognition
-The Web Speech API is the fallback, and it lives in app/_lib/use-speech-recognition.ts. It uses window.SpeechRecognition or window.webkitSpeechRecognition, which is Chrome and Edge’s browser recognizer. That path runs only when neither OPENROUTER_API_KEY nor OPENAI_API_KEY is loaded. With the OpenRouter key loaded, Tap to Speak never calls it. The browser records audio with MediaRecorder, sends it to /api/speech/transcribe, and OpenRouter transcribes it. The sidebar bars read that same microphone stream.
 
+The Web Speech API is the fallback, and it lives in app/_lib/use-speech-recognition.ts. It uses window.SpeechRecognition or window.webkitSpeechRecognition, which is Chrome and Edge’s browser recognizer. That path runs only when neither OPENROUTER_API_KEY nor OPENAI_API_KEY is loaded. With the OpenRouter key loaded, Tap to Speak never calls it. The browser records audio with MediaRecorder, sends it to /api/speech/transcribe, and OpenRouter transcribes it. The sidebar bars read that same microphone stream.
 
 Spoken replies now use OpenRouter's Grok voice model, with the voice Rex, and the audio comes back as an MP3.
 
-### Why the voice and the card do not match
+### Why the voice and the text response do not match
 
-The card and the spoken reply are the same Thesys reply, not two answers. The screen renders the full card, including titles and bullets. Voice reads the explanation.
+The text response and the spoken reply are the same Thesys reply, not two answers. The screen renders the full text response, including titles and bullets. Voice reads the explanation.
 
 `speakableReply` in `app/_lib/c1.ts` keeps the lead-in prose, every sentence in `Text`, and `ListItem` facts such as a mission name and its due date. It drops `CardHeader` titles and subtitles, bullet marks, and props such as icon and color. List items are joined with a pause, so a mission list is heard as "Teretana. Due 22 September." A long reply is cut at a sentence boundary near 4000 characters. That string goes to `/api/speech/speak`. OpenRouter reads it with Grok voice (Rex). An OpenAI key uses `gpt-4o-mini-tts` (Onyx) instead. The speech model does not write its own reply.
-
-A card can still show a title like Communication Error while JARVIS speaks the paragraph under it, and keeps going when the explanation is more than one sentence.

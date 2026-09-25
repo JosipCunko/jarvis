@@ -36,13 +36,11 @@ export function ConversationsView({
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [confirmId, setConfirmId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [preview, setPreview] = useState<CleanupHit[] | null>(null);
   const [cleaning, setCleaning] = useState(false);
 
   function startRename(thread: ChatSummary) {
-    setConfirmId(null);
     setEditingId(thread.id);
     setDraft(thread.title);
   }
@@ -114,12 +112,11 @@ export function ConversationsView({
     }
   }
 
-  async function confirmDelete(id: string) {
+  async function deleteConversation(id: string) {
     if (busyId) return;
     setBusyId(id);
     try {
       await onDelete(id);
-      setConfirmId(null);
       if (editingId === id) setEditingId(null);
     } finally {
       setBusyId(null);
@@ -160,11 +157,12 @@ export function ConversationsView({
           <div className="mb-4 rounded-lg border border-amber/40 bg-amber/10 px-3 py-3">
             <p className="text-sm">
               {preview.length === 1
-                ? "1 conversation looks unused."
-                : `${preview.length} conversations look unused.`}
+                ? "1 conversation can be removed."
+                : `${preview.length} conversations can be removed.`}
             </p>
             <p className="mt-1 text-xs text-muted">
-              Greetings, gibberish, and test prompts. Threads that ask for something stay.
+              Greetings, gibberish, test prompts, and threads last updated a month ago or longer.
+              A thread used recently stays.
             </p>
             <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto pr-1">
               {preview.map((hit) => (
@@ -209,7 +207,6 @@ export function ConversationsView({
             {threads.map((thread) => {
               const active = thread.id === activeId;
               const editing = editingId === thread.id;
-              const confirming = confirmId === thread.id;
               return (
                 <li
                   key={thread.id}
@@ -253,30 +250,6 @@ export function ConversationsView({
                         <X size={14} />
                       </button>
                     </form>
-                  ) : confirming ? (
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-sm">Delete this conversation?</p>
-                      <div className="flex gap-2">
-                        <Button
-                          shape="pill"
-                          size="sm"
-                          tone="danger"
-                          variant="solid"
-                          disabled={busyId === thread.id}
-                          onClick={() => void confirmDelete(thread.id)}
-                        >
-                          Delete
-                        </Button>
-                        <Button
-                          shape="pill"
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setConfirmId(null)}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
                   ) : (
                     <div className="flex items-start gap-2">
                       <button
@@ -302,12 +275,10 @@ export function ConversationsView({
                       </button>
                       <button
                         type="button"
-                        className="rounded-full p-2 text-muted hover:bg-danger/10 hover:text-danger"
+                        className="rounded-full p-2 text-muted hover:bg-danger/10 hover:text-danger disabled:opacity-50"
                         aria-label="Delete conversation"
-                        onClick={() => {
-                          setEditingId(null);
-                          setConfirmId(thread.id);
-                        }}
+                        disabled={busyId === thread.id}
+                        onClick={() => void deleteConversation(thread.id)}
                       >
                         <Trash2 size={14} />
                       </button>

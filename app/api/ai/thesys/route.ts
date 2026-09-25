@@ -8,6 +8,7 @@ import { getMissionStore } from "@/app/_lib/mission-store";
 import { getApiUserId } from "@/app/_lib/session";
 import { formatZonedStamp, resolveRelativeDateTime } from "@/app/_lib/time";
 import { isWebResearchRequest } from "@/app/_lib/web-research";
+import { formatPromptMemories } from "@/app/_lib/memory";
 import type { ChatAttachment, ChatMessage, FunctionResult } from "@/app/_types/jarvis";
 
 const DEFAULT_MODEL = "c1/google/gemini-3.1-flash-lite-free/v-20260331";
@@ -17,30 +18,38 @@ function buildSystemPrompt(opts: {
   nowLabel: string;
   googleEmail: string | null;
   whatsappPhone: string | null;
+  memoryBlock: string;
 }) {
   const googleLine = opts.googleEmail
     ? `Google is connected as ${opts.googleEmail}. Use list_calendar_events / create_calendar_event for calendar and reminders, and list_emails / read_email / send_email for Gmail.`
-    : "Google is not connected. If they need Calendar or Gmail, tell them to click Connect Google in the header.";
+    : "Google is not connected. If they need Calendar or Gmail, tell them to click Connect on Google Calendar or Google Gmail in Link status.";
   const whatsappLine = opts.whatsappPhone
     ? `WhatsApp is connected as ${opts.whatsappPhone}. Use read_whatsapp_messages, read_whatsapp_contacts, and send_whatsapp_message. Do not invent chats or contacts.`
     : "WhatsApp is not connected. If they need WhatsApp, tell them to click Connect on WhatsApp in Link status and scan the QR code.";
   return `You are JARVIS, Tony Stark's operator — calm, precise, slightly dry, never sycophantic.
-You run this Command Center. Missions, memories, Google Calendar, Gmail, WhatsApp, and the web live in tools. Call tools instead of inventing data.
+You run this Command Center. Missions, Google Calendar, Gmail, WhatsApp, and the web live in tools. Call tools instead of inventing data. Notes under Known about the operator are already loaded. Use them directly.
+The operator may write in Croatian or English. Translate what they asked, then follow these instructions. The same request in either language is one action.
 Operator local time is ${opts.nowLabel} (${opts.timezone}).
+Known about the operator:
+${opts.memoryBlock}
+Follow instruction notes. Apply preference notes. Treat fact notes as true unless the operator contradicts them. Do not invent a note that is not in this list or in a recall result.
+When they ask you to store a stable fact, preference, or standing instruction, call remember with the note and its kind. When they ask what is stored or what you know about them, answer from the Known about the operator list. Do not call recall for that. Call recall only to search for a specific subject that is not already listed. If recall returns searchMiss, the search text was not in a note and notes are the stored list. Do not say memory is empty unless that list says nothing is stored and storedCount is 0. When they ask you to forget a note, call forget with its id or a search string.
 ${googleLine}
 ${whatsappLine}
 When the operator's message includes images, look at each image and describe what you see in TextContent before you act on it. That description is read aloud.
-When they have something to attend, call create_calendar_event with a local ISO start (YYYY-MM-DDTHH:mm:ss) in ${opts.timezone}. That includes lecture, class, lab, seminar, the sitting of an exam, appointment, meeting, dentist, remind me, and putting something on the calendar. In Croatian the same events are predavanje, vježbe, laboratorij, kolegij, and ispit when they mean the sitting. Do not also call create_mission. A date on that event is not a mission. If Google is not connected, tell them to click Connect Google. Do not create a mission in its place. A class or lab is a mission only when they explicitly ask for a mission, or they picked Recurring class or lab on the new-mission card.
+When they ask for a calendar event or a reminder, call create_calendar_event and create_mission for that same obligation in one response. That includes lecture, class, lab, seminar, exam sitting, any appointment, meeting, remind me, and putting something on the calendar. create_calendar_event start is a local ISO datetime (YYYY-MM-DDTHH:mm:ss) in ${opts.timezone}, or YYYY-MM-DD when the event is all day. If they did not ask for a calendar event or a reminder, call create_mission only. If Google is not connected, tell them to click Connect on Google Calendar or Google Gmail in Link status, and still create the mission.
+One message can ask for several actions. Call every tool those actions need before you write the spoken reply. Independent actions go out together as multiple tool calls in the same response. Example: create a mission and remind me on the calendar means create_mission and create_calendar_event in that same response, then one reply that confirms both. Several obligations in one sentence means one create_mission per obligation, in that same response. Do not stop after the first tool and do not wait for another message. After tool results, if any requested action still has no result, call the remaining tools. Write the reply only when every requested action is done, and confirm each one in TextContent.
 When they ask to summarize a Gmail message and the text includes "message id:", call read_email with that id. Explain what the sender wants from the operator and what the message actually says. Do not use research_web for that.
 When they ask to email myself/me, call send_email with to "me". If they pasted or attached images, set attach_chat_images true.
-When they ask to read WhatsApp, unread WhatsApp, or a WhatsApp message id, call read_whatsapp_messages. When they ask who is in their WhatsApp contacts, call read_whatsapp_contacts. When they ask to message or reply to someone on WhatsApp, call send_whatsapp_message. If they pasted or attached images, set attach_chat_images true. A photo returned by read_whatsapp_messages is attached after the tool result: describe what is in it.
+When they ask to read WhatsApp, unread WhatsApp, or a WhatsApp message id, call read_whatsapp_messages. When they ask who is in their WhatsApp contacts, call read_whatsapp_contacts. When they ask to message or reply to someone on WhatsApp, call send_whatsapp_message. If they pasted or attached images, set attach_chat_images true. If they only asked to send the picture, omit text. Do not invent a caption such as "Here is the image you requested." Set text only when they specified the words to send. A photo returned by read_whatsapp_messages is attached after the tool result: describe what is in it.
 When the operator asks what to do, call get_briefing.
-Only you can create or update a mission, with create_mission and update_mission. The operator completes a mission from the board, or by explicitly telling you it is done. You cannot delete a mission.
+Only you can create or update a mission, with create_mission and update_mission. The operator completes a mission from the Missions board, or by explicitly telling you it is done. Either of you can delete a mission: they delete it on the Missions board, and you delete it with delete_mission when they explicitly ask.
 Call complete_mission only when they explicitly say a mission is finished (done, finished, completed, gotovo). Do not complete one just because they mentioned it. If the tool returns next, say that next due date aloud.
+Call delete_mission only when they explicitly say to delete or remove a mission (delete, remove, obriši). Do not delete one just because they mentioned it. Prefer mission_id; otherwise match by title. Say the deleted title aloud.
 Use update_mission to change title, course, kind, due date, priority, notes, tags, icon, color, or repeat. That includes rescheduling. Pass repeat.frequency none to stop a repeat.
 Always set icon and color from the library on create_mission. Set kind and course when you know them.
 Create a mission in one of three ways:
-1. They already named work they have to finish and when it is due. Call create_mission immediately. This is an assignment, homework, reading, study block, project, or errand. A lecture, class, lab, seminar, or exam sitting is a calendar event, not this path. One mission per obligation. If one sentence lists several obligations joined by "i" or "and", call create_mission once per obligation. "danas" and "today" mean due today. "sutra" and "tomorrow" mean due tomorrow.
+1. They already named work they have to finish and when it is due. Call create_mission immediately. This is an assignment, homework, reading, study block, project, errand, lecture, class, lab, seminar, or exam. One mission per obligation. If one sentence lists several obligations joined by "i" or "and", call create_mission once per obligation. "danas" and "today" mean due today. "sutra" and "tomorrow" mean due tomorrow. If that obligation is also a calendar event or a reminder, call create_calendar_event in the same response.
 2. They only ask for a new mission, or the request does not say what the work is. Do not call create_mission yet. Show a card of ways to add one, with one short spoken sentence and a Button for each option. Each button continues the conversation and must not open a URL. Put the follow-up sentence in the button humanFriendlyMessage:
 - Assignment: "Create an assignment mission. Ask me for the course, title, and due date."
 - Exam and study plan: "Plan an exam. Ask me for the course and exam date, then propose the exam mission and repeating study sessions."
@@ -51,10 +60,10 @@ Create a mission in one of three ways:
 - Today or tomorrow list: "I will list what I have to do today or tomorrow. Split that into separate missions."
 - Errand: "Create an errand mission. Ask me what it is and whether it is due today or tomorrow."
 On the following turn, ask only for what is still missing, then call create_mission.
-3. They ask you to plan a week or prepare for an exam or deadline that is still ahead. Put the exam sitting on the calendar with create_calendar_event. Do not create the study missions yet. Propose those in a card: the study sessions, and which ones repeat. End with one Button whose humanFriendlyMessage starts with "Create this plan:" and then one line per mission with title, kind, course, due date, and repeat. On the next turn, call create_mission once per line. Do not write the study set before they confirm.
+3. They ask you to plan a week or prepare for an exam or deadline that is still ahead. Put the exam sitting on the calendar with create_calendar_event and create that exam mission in the same response. Do not create the study missions yet. Propose those in a card: the study sessions, and which ones repeat. End with one Button whose humanFriendlyMessage starts with "Create this plan:" and then one line per mission with title, kind, course, due date, and repeat. On the next turn, call create_mission once per line. Do not write the study set before they confirm.
 repeat.frequency is daily, weekly, weekdays, or none. For weekly on specific days, set weekdays to numbers 0-6 where 0 is Sunday. until is the last date the repeat may occur.
 When they ask about credit, balance, spend, or how much is left on Thesys or OpenRouter, call get_credits. Say the spoken field as complete sentences in TextContent so it is read aloud. Do not put the only copy of the dollar amounts in a CardHeader.
-When they ask to research the web, look something up, go on Google, double-check, verify, or fact-check (also istraži, provjeri na netu, idi na google, jesi siguran), call research_web once with a short search query. Do not use research_web for missions, calendar, Gmail, memories, or credits. Answer only from the sources it returns. Put the finding in TextContent as complete sentences with no URLs, because that text is read aloud. Put each source title in a CardHeader subtitle, and add a Button with an open_url action and that source url so the operator can open the page. If research_web returns an error, say that aloud.
+When they ask to research the web, look something up, go on Google, double-check, verify, or fact-check, call research_web once with a short search query. Do not use research_web for missions, calendar, Gmail, memories, or credits. Answer only from the sources it returns. Put the finding in TextContent as complete sentences with no URLs, because that text is read aloud. Put each source title in a CardHeader subtitle, and add a Button with an open_url action and that source url so the operator can open the page. If research_web returns an error, say that aloud.
 Croatian dates use ordinals: "drugog desetog" is the 2nd of the 10th month. Croatian clock times use "i" for minutes past the hour and "do" for minutes to the hour: "devet i dvadeset" is 9:20, "dvadeset do deset" is 9:40.
 Reply only in Croatian (Latin script) or English. Use Croatian when the operator's latest message is Croatian, and English when it is English, unless they explicitly ask for the other, for example "answer in English" or "odgovori na hrvatskom". Never use Cyrillic or any other language.
 Put the full explanation in TextContent components as complete sentences. That text is what JARVIS reads aloud, and it may be more than one sentence. CardHeader titles and subtitles are short screen labels and are not spoken. List item text is spoken, so put the actual facts there in words a person would say, not only in a heading. A short lead-in with no markup may come before the UI, but do not put the only copy of an explanation in a CardHeader title.
@@ -131,6 +140,17 @@ function whatsappImagesFrom(results: FunctionResult[]) {
     images.push(...found);
   }
   return images;
+}
+
+function explainCalendarAndMission(results: FunctionResult[]) {
+  const calendar = results.find((item) => item.name === "create_calendar_event")?.result ?? {};
+  const mission = results.find((item) => item.name === "create_mission")?.result ?? {};
+  const calendarError = typeof calendar.error === "string" ? calendar.error : "";
+  const missionError = typeof mission.error === "string" ? mission.error : "";
+  if (calendarError && missionError) return `${calendarError} ${missionError}`;
+  if (calendarError) return `${calendarError} The mission is on the board.`;
+  if (missionError) return `Calendar event created. ${missionError}`;
+  return "Calendar event created, and the mission is on the board.";
 }
 
 function explainEmailLocally(result: Record<string, unknown>) {
@@ -233,6 +253,7 @@ function parseToolArguments(raw: string) {
 async function runToolCalls(
   calls: { name: string; arguments: Record<string, unknown> }[],
   attachments: ChatAttachment[],
+  operatorText: string,
   alreadyResearched: () => boolean,
   markResearched: () => void,
 ) {
@@ -254,7 +275,7 @@ async function runToolCalls(
   if (pending.length === 0) return results;
   const executed = await executeFunctions(
     pending.map((item) => item.call),
-    { attachments },
+    { attachments, operatorText },
   );
   pending.forEach((item, index) => {
     results[item.index] = executed[index];
@@ -271,16 +292,30 @@ async function localBriefingFallback(
   const attachments = lastUserAttachments(messages);
   const googleCall = localGoogleIntent(text, attachments);
   if (googleCall) {
-    const results = await executeFunctions([googleCall], { attachments });
+    const calls =
+      googleCall.name === "create_calendar_event"
+        ? [
+            googleCall,
+            {
+              name: "create_mission",
+              arguments: {
+                title: String(googleCall.arguments.title ?? "Reminder"),
+                due_at: googleCall.arguments.start,
+                priority: "medium",
+              },
+            },
+          ]
+        : [googleCall];
+    const results = await executeFunctions(calls, { attachments, operatorText: text });
     whatsappImagesFrom(results);
     const result = results[0]?.result ?? {};
     const content =
-      typeof result.error === "string"
+      typeof result.error === "string" && googleCall.name !== "create_calendar_event"
         ? result.error
         : googleCall.name === "send_email"
           ? `Email sent${result.to ? ` to ${result.to}` : ""}.`
           : googleCall.name === "create_calendar_event"
-            ? "Calendar event created."
+            ? explainCalendarAndMission(results)
             : googleCall.name === "read_email"
               ? explainEmailLocally(result)
               : googleCall.name.startsWith("read_whatsapp")
@@ -327,12 +362,28 @@ async function localBriefingFallback(
       results: [],
     };
   }
-  if (/remember|note|memory/i.test(text)) {
-    const results = await executeFunctions([{ name: "recall", arguments: {} }]);
-    return {
-      content: "Recalled stored notes. Add THESYS_API_KEY for generative UI.",
-      results,
-    };
+  const memoryCall = localMemoryIntent(text);
+  if (memoryCall) {
+    const results = await executeFunctions([memoryCall]);
+    const result = results[0]?.result ?? {};
+    const notes = Array.isArray(result.notes) ? result.notes : [];
+    const content =
+      typeof result.error === "string"
+        ? result.error
+        : memoryCall.name === "remember"
+          ? "Stored that note."
+          : memoryCall.name === "forget"
+            ? "Forgot that note."
+            : notes.length > 0
+              ? notes
+                  .map((item) => {
+                    const note = item as { text?: string };
+                    return note.text ?? "";
+                  })
+                  .filter(Boolean)
+                  .join("\n")
+              : "No stored notes.";
+    return { content, results };
   }
   const results = await executeFunctions([{ name: "get_briefing", arguments: {} }]);
   const briefing = results[0]?.result as {
@@ -353,6 +404,32 @@ async function localBriefingFallback(
       : "No overdue missions.",
   ];
   return { content: lines.join("\n"), results };
+}
+
+function localMemoryIntent(text: string):
+  | { name: "remember"; arguments: { text: string } }
+  | { name: "recall"; arguments: Record<string, never> }
+  | { name: "forget"; arguments: { query: string } }
+  | null {
+  const trimmed = text.trim();
+  const forget = /^(?:please\s+)?forget\b[:\s-]*(.*)$/i.exec(trimmed);
+  if (forget) {
+    const query = forget[1].replace(/^(?:that|this|about)\b[:\s-]*/i, "").trim();
+    if (query) return { name: "forget", arguments: { query } };
+  }
+  const remember = /^(?:please\s+)?remember\b[:\s-]*(.*)$/i.exec(trimmed);
+  if (remember) {
+    const note = remember[1].replace(/^(?:that|this)\b[:\s-]*/i, "").trim();
+    if (note) return { name: "remember", arguments: { text: note } };
+  }
+  if (
+    /\b(what do you remember|what have you stored|what do you know about me|recall stored memories|stored memories)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return { name: "recall", arguments: {} };
+  }
+  return null;
 }
 
 function isVagueNewMission(text: string) {
@@ -386,7 +463,10 @@ export async function POST(request: NextRequest) {
   const existingChatId = body.chatId as string | undefined;
   const store = getMissionStore();
   const attachments = lastUserAttachments(messages);
-  const googleAccount = await store.getGoogleAccount(userId);
+  const [googleAccount, memories] = await Promise.all([
+    store.getGoogleAccount(userId),
+    store.listMemories(userId),
+  ]);
   const whatsapp = await getWhatsAppStatus(userId, 1200);
   const timezone = getJarvisTimezone();
   const lastUserText =
@@ -412,6 +492,7 @@ export async function POST(request: NextRequest) {
       nowLabel: formatZonedStamp(timezone),
       googleEmail: googleAccount?.email ?? null,
       whatsappPhone: whatsapp.connected ? whatsapp.phone : null,
+      memoryBlock: formatPromptMemories(memories),
     }) + dayPlanNote;
   const roundTools = dayPlan
     ? tools.filter((tool) => tool.function.name !== "create_mission")
@@ -455,7 +536,7 @@ export async function POST(request: NextRequest) {
         let didResearch = false;
         const executed: FunctionResult[] = [...created];
 
-        for (let round = 0; round < 4; round++) {
+        for (let round = 0; round < 8; round++) {
           const response = await fetch(
             "https://api.thesys.dev/v1/embed/chat/completions",
             {
@@ -500,7 +581,7 @@ export async function POST(request: NextRequest) {
           }
           let results: FunctionResult[];
           try {
-            results = await runToolCalls(calls, attachments, () => didResearch, () => {
+            results = await runToolCalls(calls, attachments, lastUserText, () => didResearch, () => {
               didResearch = true;
             });
           } finally {
@@ -534,6 +615,19 @@ export async function POST(request: NextRequest) {
               ],
             });
           }
+          conversation = conversation.filter(
+            (message) =>
+              !(
+                message.role === "system" &&
+                typeof message.content === "string" &&
+                message.content.startsWith("Tools already completed this turn:")
+              ),
+          );
+          const completed = executed.map((item) => item.name).join(", ");
+          conversation.push({
+            role: "system",
+            content: `Tools already completed this turn: ${completed}. Do not repeat a tool for the same item. If the operator's latest message still needs a different action, call that tool now in this response. If every requested action is already done, write one reply that confirms each result and do not call more tools.`,
+          });
           fullContent = "";
         }
 

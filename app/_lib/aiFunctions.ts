@@ -19,6 +19,7 @@ import {
   repeatLabel,
 } from "./mission-repeat";
 import { resolveTaskAppearance, TASK_COLOR_IDS, TASK_ICON_IDS, taskAppearanceGuide } from "./task-appearance";
+import { parseMemoryKind } from "./memory";
 import { formatWhen, parseWhen, startOfToday, endOfToday } from "./time";
 import type { ChatAttachment, FunctionResult, Task, TaskPriority } from "@/app/_types/jarvis";
 
@@ -96,7 +97,7 @@ export const AI_FUNCTIONS = [
   {
     name: "update_mission",
     description:
-      "Update an existing mission's title, course, kind, due date, priority, notes, tags, icon, color, or repeat. Use this to reschedule. Pass repeat.frequency none to stop repeating. You cannot delete a mission and you cannot mark it complete with this tool.",
+      "Update an existing mission's title, course, kind, due date, priority, notes, tags, icon, color, or repeat. Use this to reschedule. Pass repeat.frequency none to stop repeating. You cannot mark it complete or delete it with this tool.",
     parameters: {
       type: "object",
       properties: {
@@ -129,20 +130,55 @@ export const AI_FUNCTIONS = [
     },
   },
   {
-    name: "remember",
-    description: "Store a short memory note JARVIS should recall later.",
+    name: "delete_mission",
+    description:
+      "Delete a mission when the operator explicitly asks to delete or remove it. Prefer mission_id; otherwise match by title. This removes the mission. It does not mark it done.",
     parameters: {
       type: "object",
-      properties: { text: { type: "string" } },
+      properties: {
+        mission_id: { type: "string" },
+        title: { type: "string" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "remember",
+    description:
+      "Store a short note the operator asked you to remember: a stable fact, preference, or standing instruction. Set kind. Do not use this for a one-off task or a calendar event. The same request in either language is this action.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string" },
+        kind: {
+          type: "string",
+          enum: ["fact", "preference", "instruction"],
+          description: "fact is a personal truth, preference is how they like things done, instruction is a standing order.",
+        },
+      },
       required: ["text"],
     },
   },
   {
     name: "recall",
-    description: "Search stored memories.",
+    description:
+      "Search note text for a specific subject that is not already in the prompt. Do not call this to list memories. Leave query empty only for notes cut off from the prompt. Never set query to the request itself.",
     parameters: {
       type: "object",
       properties: { query: { type: "string" } },
+      required: [],
+    },
+  },
+  {
+    name: "forget",
+    description:
+      "Delete one stored memory when the operator asks to forget it. Prefer note_id from the prompt list or from recall. Otherwise pass query, and delete only when one note matches.",
+    parameters: {
+      type: "object",
+      properties: {
+        note_id: { type: "string" },
+        query: { type: "string" },
+      },
       required: [],
     },
   },
@@ -166,7 +202,7 @@ export const AI_FUNCTIONS = [
   {
     name: "create_calendar_event",
     description:
-      "Create a Google Calendar event. Use when the operator says remind me, add an appointment, dentist, meeting, etc. start must be local ISO datetime YYYY-MM-DDTHH:mm:ss or YYYY-MM-DD for all-day.",
+      "Create a Google Calendar event when the operator asks for a calendar event or a reminder, including a lecture, class, lab, seminar, exam sitting, appointment, or meeting. Also call create_mission for that same obligation. start must be local ISO datetime YYYY-MM-DDTHH:mm:ss or YYYY-MM-DD for all-day.",
     parameters: {
       type: "object",
       properties: {
@@ -252,12 +288,16 @@ export const AI_FUNCTIONS = [
   {
     name: "send_whatsapp_message",
     description:
-      "Send a WhatsApp message to a contact name or phone number. If they pasted or attached images, set attach_chat_images true so those images are sent with the message.",
+      "Send a WhatsApp message to a contact name or phone number. If they pasted or attached images, set attach_chat_images true. Omit text when they only asked to send the image. Set text only to words they asked to include.",
     parameters: {
       type: "object",
       properties: {
         to: { type: "string", description: "Contact name or phone number." },
-        text: { type: "string" },
+        text: {
+          type: "string",
+          description:
+            "Words the operator asked to send with the image. Leave empty when they only asked to send a picture.",
+        },
         attach_chat_images: {
           type: "boolean",
           description: "Send images pasted in this chat message. Default true if images are present.",
@@ -269,7 +309,7 @@ export const AI_FUNCTIONS = [
   {
     name: "research_web",
     description:
-      "Search the web once and return source titles, urls, and snippets. Use only when the operator asks to research the web, look it up, go on Google, double-check, verify, or fact-check. Croatian: istraži, provjeri na netu, idi na google, jesi siguran. Do not use for missions, calendar, Gmail, memories, or credits.",
+      "Search the web once and return source titles, urls, and snippets. Use only when the operator asks to research the web, look it up, go on Google, double-check, verify, or fact-check. Do not use for missions, calendar, Gmail, memories, or credits.",
     parameters: {
       type: "object",
       properties: {
@@ -285,6 +325,7 @@ export const AI_FUNCTIONS = [
 
 export type FunctionContext = {
   attachments?: ChatAttachment[];
+  operatorText?: string;
 };
 
 function serializeTask(task: Task) {
@@ -327,7 +368,7 @@ function missionFields(args: Record<string, unknown>) {
   };
 }
 
-async function findTask(userId: string, taskId?: string, title?: string) {
+async function findTask(userId: string, taskId?: string, title?: string, includeDone = false) {
   const store = getMissionStore();
   if (taskId) {
     const tasks = await store.listTasks(userId);
@@ -335,7 +376,7 @@ async function findTask(userId: string, taskId?: string, title?: string) {
   }
   if (!title) return null;
   const lower = title.toLowerCase();
-  const tasks = await store.listTasks(userId, { status: "active" });
+  const tasks = await store.listTasks(userId, includeDone ? undefined : { status: "active" });
   return (
     tasks.find((task) => task.title.toLowerCase() === lower) ??
     tasks.find((task) => task.title.toLowerCase().includes(lower)) ??
@@ -354,6 +395,7 @@ export async function executeFunctions(
   const store = getMissionStore();
   const results: FunctionResult[] = [];
   const attachments = context.attachments ?? [];
+  const operatorText = context.operatorText ?? "";
 
   for (const call of functionCalls) {
     const args = call.arguments ?? {};
@@ -480,15 +522,64 @@ export async function executeFunctions(
             next: completed.next ? serializeTask(completed.next) : null,
           },
         });
+      } else if (call.name === "delete_mission") {
+        const found = await findTask(
+          userId,
+          typeof args.mission_id === "string" ? args.mission_id : undefined,
+          typeof args.title === "string" ? args.title : undefined,
+          true,
+        );
+        if (!found) {
+          results.push({ name: call.name, result: { error: "Mission not found" } });
+          continue;
+        }
+        await store.deleteTask(userId, found.id);
+        results.push({
+          name: call.name,
+          result: { ok: true, task: serializeTask(found) },
+        });
       } else if (call.name === "remember") {
-        const note = await store.remember(userId, String(args.text ?? ""));
+        const kind = parseMemoryKind(args.kind);
+        const note = await store.remember(userId, String(args.text ?? ""), kind);
         results.push({ name: call.name, result: { ok: true, note } });
       } else if (call.name === "recall") {
-        const notes = await store.recall(
-          userId,
-          typeof args.query === "string" ? args.query : undefined,
-        );
-        results.push({ name: call.name, result: { notes } });
+        const query = typeof args.query === "string" ? args.query.trim() : "";
+        const all = await store.listMemories(userId);
+        const matched = query
+          ? all.filter((note) => note.text.toLowerCase().includes(query.toLowerCase()))
+          : all;
+        const searchMiss = query.length > 0 && matched.length === 0;
+        results.push({
+          name: call.name,
+          result: {
+            storedCount: all.length,
+            matchedCount: matched.length,
+            searchMiss,
+            notes: (searchMiss ? all : matched).slice(0, 8),
+          },
+        });
+      } else if (call.name === "forget") {
+        const noteId = typeof args.note_id === "string" ? args.note_id.trim() : "";
+        const query = typeof args.query === "string" ? args.query.trim() : "";
+        if (noteId) {
+          await store.forgetMemory(userId, noteId);
+          results.push({ name: call.name, result: { ok: true, removed: 1 } });
+        } else if (query) {
+          const notes = await store.recall(userId, query);
+          if (notes.length === 0) {
+            results.push({ name: call.name, result: { error: "No matching note" } });
+          } else if (notes.length > 1) {
+            results.push({
+              name: call.name,
+              result: { error: "Several notes match. Pass note_id.", notes },
+            });
+          } else {
+            await store.forgetMemory(userId, notes[0].id);
+            results.push({ name: call.name, result: { ok: true, removed: 1, note: notes[0] } });
+          }
+        } else {
+          results.push({ name: call.name, result: { error: "note_id or query is required" } });
+        }
       } else if (call.name === "list_calendar_events") {
         const events = await listCalendarEvents(userId, {
           days: typeof args.days === "number" ? args.days : undefined,
@@ -556,6 +647,7 @@ export async function executeFunctions(
             attach_chat_images: args.attach_chat_images === false ? false : true,
           },
           attachments,
+          operatorText,
         );
         results.push({ name: call.name, result: sent });
       } else if (call.name === "research_web") {

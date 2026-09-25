@@ -14,10 +14,10 @@ const JARVIS_THEME = {
   strokeDefault: "rgba(0, 212, 255, 0.28)",
   interactiveAccent: "#00d4ff",
   interactiveAccentHover: "#5ce1ff",
-  chatAssistantResponseBg: "#0a1c30",
+  chatAssistantResponseBg: "transparent",
   chatAssistantResponseText: "#e8f7ff",
-  chatUserResponseBg: "#00d4ff",
-  chatUserResponseText: "#021018",
+  chatUserResponseBg: "transparent",
+  chatUserResponseText: "#5ce1ff",
   dangerPrimaryText: "#ff5d73",
   alertPrimaryText: "#f5c542",
 };
