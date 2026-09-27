@@ -1,10 +1,9 @@
 import { audioFormat, getSpeechBackend, TRANSCRIBE_PROMPT } from "@/app/_lib/speech-provider";
 import { getApiUserId } from "@/app/_lib/session";
 import { acceptSpeech, type SpeechLanguage } from "@/app/_lib/speech-lang";
+import { MAX_AUDIO_BYTES } from "@/app/_lib/utils";
 
 export const runtime = "nodejs";
-
-const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
 function languageFromPayload(text: string): { text: string; language: SpeechLanguage } | null {
   return acceptSpeech(text);

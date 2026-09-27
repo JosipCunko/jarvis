@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { LocalWeather } from "@/app/_types/workflows";
-
-const REFRESH_MS = 10 * 60 * 1000;
+import { REFRESH_MS } from "@/app/_lib/utils";
 
 function geoMessage(error: unknown) {
   const code =

@@ -4,9 +4,7 @@ import { useId, type ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import JarvisMark from "@/app/_components/JarvisMark";
 import { cn } from "@/app/_lib/cn";
-
-const CX = 200;
-const CY = 200;
+import { CX, CY } from "@/app/_lib/utils";
 
 function polar(radius: number, deg: number) {
   const rad = ((deg - 90) * Math.PI) / 180;

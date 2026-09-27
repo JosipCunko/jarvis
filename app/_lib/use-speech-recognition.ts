@@ -3,8 +3,9 @@
 /// <reference path="../_types/speech-recognition.d.ts" />
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { END_OF_TURN_SILENCE_MS } from "@/app/_lib/utils";
 
-export const END_OF_TURN_SILENCE_MS = 1000;
+export { END_OF_TURN_SILENCE_MS };
 
 export type SpeechStartOptions = {
   continuous?: boolean;

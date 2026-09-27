@@ -62,6 +62,11 @@ export function formatZonedStamp(timeZone: string, at = new Date()) {
   return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)} ${pad2(parts.hour)}:${pad2(parts.minute)}`;
 }
 
+export function promptDayKey(timeZone: string, at = new Date()) {
+  const parts = zonedDateParts(timeZone, at);
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
+}
+
 function wallClockUtc(
   timeZone: string,
   year: number,

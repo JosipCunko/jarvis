@@ -4,11 +4,12 @@ import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { differenceInCalendarDays } from "date-fns";
 import { adminDb } from "./admin";
-import { isFirebaseAdminConfigured } from "./config";
+import { getJarvisTimezone, isFirebaseAdminConfigured } from "./config";
+import { DAILY_PROMPT_LIMIT, isAdminEmail } from "./utils";
 import { nextRepeatDue, normalizeRepeat } from "./mission-repeat";
 import { resolveTaskAppearance } from "./task-appearance";
 import { normalizeMemoryText } from "./memory";
-import { parseWhen, startOfToday } from "./time";
+import { parseWhen, promptDayKey, startOfToday } from "./time";
 import type {
   AppUser,
   ChatMessage,
@@ -256,6 +257,35 @@ class FirestoreMissionStore implements MissionStore {
       return snap.exists ? (snap.data() as AppUser) : null;
     }
     return memory().users.get(userId) ?? null;
+  }
+
+  async consumeDailyPrompt(userId: string) {
+    const day = promptDayKey(getJarvisTimezone());
+    await ensureMemory();
+    if (firestoreEnabled()) {
+      const ref = adminDb.collection("users").doc(userId);
+      return adminDb.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) return { allowed: false, blocked: true };
+        const data = snap.data() as AppUser;
+        if (isAdminEmail(data.email)) return { allowed: true, blocked: false };
+        const count = data.promptDay === day ? Number(data.promptCount) || 0 : 0;
+        if (count >= DAILY_PROMPT_LIMIT) return { allowed: false, blocked: true };
+        const next = count + 1;
+        tx.set(ref, { promptDay: day, promptCount: next }, { merge: true });
+        return { allowed: true, blocked: next >= DAILY_PROMPT_LIMIT };
+      });
+    }
+
+    const existing = memory().users.get(userId);
+    if (!existing) return { allowed: false, blocked: true };
+    if (isAdminEmail(existing.email)) return { allowed: true, blocked: false };
+    const count = existing.promptDay === day ? Number(existing.promptCount) || 0 : 0;
+    if (count >= DAILY_PROMPT_LIMIT) return { allowed: false, blocked: true };
+    const next = count + 1;
+    memory().users.set(userId, { ...existing, promptDay: day, promptCount: next });
+    await persistMemory();
+    return { allowed: true, blocked: next >= DAILY_PROMPT_LIMIT };
   }
 
   async listTasks(userId: string, filter?: TaskFilter) {

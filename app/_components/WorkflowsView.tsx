@@ -8,8 +8,7 @@ import { MailCard } from "@/app/_components/MailCard";
 import { WeatherGlyph } from "@/app/_components/WeatherGlyph";
 import { cn } from "@/app/_lib/cn";
 import type { LocalWeather, MailLimit, WorkflowBriefing, WorkflowMail } from "@/app/_types/workflows";
-
-const MAIL_LIMITS = [5, 10, 20] as const;
+import { MAIL_LIMITS } from "@/app/_lib/utils";
 
 export function WorkflowsView({
   googleConfigured,

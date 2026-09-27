@@ -25,6 +25,8 @@ export interface AppUser {
   createdAt: number;
   lastLoginAt: number;
   provider: AuthProvider;
+  promptDay?: string;
+  promptCount?: number;
 }
 
 export interface Task {
@@ -138,6 +140,7 @@ export interface MissionSnapshot {
 export interface MissionStore {
   upsertUser(user: AppUser): Promise<void>;
   getUser(userId: string): Promise<AppUser | null>;
+  consumeDailyPrompt(userId: string): Promise<{ allowed: boolean; blocked: boolean }>;
   listTasks(userId: string, filter?: TaskFilter): Promise<Task[]>;
   upsertTask(userId: string, task: TaskInput): Promise<Task>;
   completeTask(userId: string, id: string): Promise<MissionCompletion>;

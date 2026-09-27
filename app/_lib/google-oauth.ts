@@ -3,16 +3,9 @@ import { createHmac, randomBytes } from "crypto";
 import { getGoogleRedirectUri } from "@/app/_lib/config";
 import { getMissionStore } from "@/app/_lib/mission-store";
 import type { GoogleAccount } from "@/app/_types/jarvis";
+import { GOOGLE_OAUTH_COOKIE, GOOGLE_SCOPES } from "@/app/_lib/utils";
 
-export const GOOGLE_SCOPES = [
-  "openid",
-  "https://www.googleapis.com/auth/userinfo.email",
-  "https://www.googleapis.com/auth/calendar",
-  "https://www.googleapis.com/auth/gmail.readonly",
-  "https://www.googleapis.com/auth/gmail.send",
-] as const;
-
-export const GOOGLE_OAUTH_COOKIE = "jarvis.google.oauth";
+export { GOOGLE_OAUTH_COOKIE, GOOGLE_SCOPES };
 
 function oauthSecret() {
   return (

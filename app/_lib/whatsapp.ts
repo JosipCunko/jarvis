@@ -15,11 +15,7 @@ import makeWASocket, {
   type WASocket,
 } from "@whiskeysockets/baileys";
 import type { ChatAttachment } from "@/app/_types/jarvis";
-
-const NOT_LINKED = "WhatsApp is not linked. Connect it in Link status.";
-const MAX_MESSAGES = 400;
-const MAX_RAW_IMAGES = 40;
-const MAX_IMAGE_BYTES = 4.5 * 1024 * 1024;
+import { MAX_IMAGE_BYTES, MAX_MESSAGES, MAX_RAW_IMAGES, NOT_LINKED } from "@/app/_lib/utils";
 
 const silentLogger = {
   level: "silent",

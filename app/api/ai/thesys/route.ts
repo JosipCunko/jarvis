@@ -10,8 +10,7 @@ import { formatZonedStamp, resolveRelativeDateTime } from "@/app/_lib/time";
 import { isWebResearchRequest } from "@/app/_lib/web-research";
 import { formatPromptMemories } from "@/app/_lib/memory";
 import type { ChatAttachment, ChatMessage, FunctionResult } from "@/app/_types/jarvis";
-
-const DEFAULT_MODEL = "c1/google/gemini-3.1-flash-lite-free/v-20260331";
+import { DEFAULT_MODEL, PROMPT_LIMIT_MESSAGE } from "@/app/_lib/utils";
 
 function buildSystemPrompt(opts: {
   timezone: string;
@@ -33,12 +32,13 @@ Operator local time is ${opts.nowLabel} (${opts.timezone}).
 Known about the operator:
 ${opts.memoryBlock}
 Follow instruction notes. Apply preference notes. Treat fact notes as true unless the operator contradicts them. Do not invent a note that is not in this list or in a recall result.
-When they ask you to store a stable fact, preference, or standing instruction, call remember with the note and its kind. When they ask what is stored or what you know about them, answer from the Known about the operator list. Do not call recall for that. Call recall only to search for a specific subject that is not already listed. If recall returns searchMiss, the search text was not in a note and notes are the stored list. Do not say memory is empty unless that list says nothing is stored and storedCount is 0. When they ask you to forget a note, call forget with its id or a search string.
+When they ask you to remember something for them, is particularly very important to the user, or store a stable fact, preference, or standing instruction, call remember with the note and its kind. When they ask what is stored or what you know about them, answer from the Known about the operator list. Do not call recall for that. Call recall only to search for a specific subject that is not already listed. If recall returns searchMiss, the search text was not in a note and notes are the stored list. Do not say memory is empty unless that list says nothing is stored and storedCount is 0. When they ask you to forget a note, call forget with its id or a search string.
 ${googleLine}
 ${whatsappLine}
 When the operator's message includes images, look at each image and describe what you see in TextContent before you act on it. That description is read aloud.
-When they ask for a calendar event or a reminder, call create_calendar_event and create_mission for that same obligation in one response. That includes lecture, class, lab, seminar, exam sitting, any appointment, meeting, remind me, and putting something on the calendar. create_calendar_event start is a local ISO datetime (YYYY-MM-DDTHH:mm:ss) in ${opts.timezone}, or YYYY-MM-DD when the event is all day. If they did not ask for a calendar event or a reminder, call create_mission only. If Google is not connected, tell them to click Connect on Google Calendar or Google Gmail in Link status, and still create the mission.
-One message can ask for several actions. Call every tool those actions need before you write the spoken reply. Independent actions go out together as multiple tool calls in the same response. Example: create a mission and remind me on the calendar means create_mission and create_calendar_event in that same response, then one reply that confirms both. Several obligations in one sentence means one create_mission per obligation, in that same response. Do not stop after the first tool and do not wait for another message. After tool results, if any requested action still has no result, call the remaining tools. Write the reply only when every requested action is done, and confirm each one in TextContent.
+A reminder is a calendar event, not a mission. When they ask to remind them, notify them or put something on the calendar, call create_calendar_event only. That includes lecture, class, lab, seminar, exam sitting, appointment, meeting. create_calendar_event start is a local ISO datetime (YYYY-MM-DDTHH:mm:ss) in ${opts.timezone}, or YYYY-MM-DD when the event is all day. Do not call create_mission for that reminder, even when the same sentence also completes, updates, or mentions a mission. If Google is not connected, tell them to click Connect on Google Calendar or Google Gmail in Link status. Do not create a mission in its place.
+Call create_mission and create_calendar_event together only when they explicitly ask for both for the same piece of work. You never add a second mission whose title is the reminder.
+One message can ask for several actions. Call every tool those actions need before you write the spoken reply. Independent actions go out together as multiple tool calls in the same response. Completing a mission and adding a reminder means complete_mission and create_calendar_event, then one reply that confirms both. Do not call create_mission for the reminder. Several pieces of work they have to finish, joined by "i" or "and", means one create_mission per piece of work. A reminder in that sentence is not another piece of work. Do not stop after the first tool and do not wait for another message. After tool results, if any requested action still has no result, call the remaining tools. Write the reply only when every requested action is done, and confirm each one in TextContent.
 When they ask to summarize a Gmail message and the text includes "message id:", call read_email with that id. Explain what the sender wants from the operator and what the message actually says. Do not use research_web for that.
 When they ask to email myself/me, call send_email with to "me". If they pasted or attached images, set attach_chat_images true.
 When they ask to read WhatsApp, unread WhatsApp, or a WhatsApp message id, call read_whatsapp_messages. When they ask who is in their WhatsApp contacts, call read_whatsapp_contacts. When they ask to message or reply to someone on WhatsApp, call send_whatsapp_message. If they pasted or attached images, set attach_chat_images true. If they only asked to send the picture, omit text. Do not invent a caption such as "Here is the image you requested." Set text only when they specified the words to send. A photo returned by read_whatsapp_messages is attached after the tool result: describe what is in it.
@@ -49,7 +49,7 @@ Call delete_mission only when they explicitly say to delete or remove a mission 
 Use update_mission to change title, course, kind, due date, priority, notes, tags, icon, color, or repeat. That includes rescheduling. Pass repeat.frequency none to stop a repeat.
 Always set icon and color from the library on create_mission. Set kind and course when you know them.
 Create a mission in one of three ways:
-1. They already named work they have to finish and when it is due. Call create_mission immediately. This is an assignment, homework, reading, study block, project, errand, lecture, class, lab, seminar, or exam. One mission per obligation. If one sentence lists several obligations joined by "i" or "and", call create_mission once per obligation. "danas" and "today" mean due today. "sutra" and "tomorrow" mean due tomorrow. If that obligation is also a calendar event or a reminder, call create_calendar_event in the same response.
+1. They already named work they have to finish and when it is due. Call create_mission immediately. This is an assignment, homework, reading, study block, project, errand. A reminder to notify someone is not this path. One mission per piece of work. If one sentence lists several pieces of work, call create_mission once per piece of work. "danas" and "today" mean due today. "sutra" and "tomorrow" mean due tomorrow. If they also ask to put that same piece of work on the calendar, call create_calendar_event for it in the same response. Do not create a mission for the reminder.
 2. They only ask for a new mission, or the request does not say what the work is. Do not call create_mission yet. Show a card of ways to add one, with one short spoken sentence and a Button for each option. Each button continues the conversation and must not open a URL. Put the follow-up sentence in the button humanFriendlyMessage:
 - Assignment: "Create an assignment mission. Ask me for the course, title, and due date."
 - Exam and study plan: "Plan an exam. Ask me for the course and exam date, then propose the exam mission and repeating study sessions."
@@ -462,6 +462,10 @@ export async function POST(request: NextRequest) {
   const model = body.modelId || DEFAULT_MODEL;
   const existingChatId = body.chatId as string | undefined;
   const store = getMissionStore();
+  const allowance = await store.consumeDailyPrompt(userId);
+  if (!allowance.allowed) {
+    return Response.json({ error: { message: PROMPT_LIMIT_MESSAGE } }, { status: 429 });
+  }
   const attachments = lastUserAttachments(messages);
   const [googleAccount, memories] = await Promise.all([
     store.getGoogleAccount(userId),
@@ -521,7 +525,9 @@ export async function POST(request: NextRequest) {
               },
             ],
           );
-          controller.enqueue(encode("done", { chatId: chat.id, duration: 0 }));
+          controller.enqueue(
+            encode("done", { chatId: chat.id, duration: 0, promptsBlocked: allowance.blocked }),
+          );
           controller.close();
           return;
         }
@@ -626,7 +632,7 @@ export async function POST(request: NextRequest) {
           const completed = executed.map((item) => item.name).join(", ");
           conversation.push({
             role: "system",
-            content: `Tools already completed this turn: ${completed}. Do not repeat a tool for the same item. If the operator's latest message still needs a different action, call that tool now in this response. If every requested action is already done, write one reply that confirms each result and do not call more tools.`,
+            content: `Tools already completed this turn: ${completed}. Do not repeat a tool for the same item. A reminder that already has create_calendar_event does not need create_mission. If the operator's latest message still needs a different action, call that tool now in this response. If every requested action is already done, write one reply that confirms each result and do not call more tools.`,
           });
           fullContent = "";
         }
@@ -651,7 +657,9 @@ export async function POST(request: NextRequest) {
             },
           ],
         );
-        controller.enqueue(encode("done", { chatId: chat.id, duration: 0 }));
+        controller.enqueue(
+          encode("done", { chatId: chat.id, duration: 0, promptsBlocked: allowance.blocked }),
+        );
       } catch (error) {
         controller.enqueue(
           encode("error", {
@@ -668,6 +676,7 @@ export async function POST(request: NextRequest) {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
+      "X-Prompts-Blocked": allowance.blocked ? "1" : "0",
     },
   });
 }

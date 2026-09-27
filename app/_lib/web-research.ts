@@ -1,7 +1,5 @@
 import "server-only";
-
-const MODEL = "google/gemini-2.5-flash-lite";
-const COMPLETIONS = "https://openrouter.ai/api/v1/chat/completions";
+import { COMPLETIONS, MODEL } from "@/app/_lib/utils";
 
 const RESEARCH_INTENT =
   /\b(research\s+the\s+web|look(?:\s+(?:it|this|that))?\s+up|go\s+on\s+google|google\s+(?:it|this|that)|double[-\s]?check|fact[-\s]?check|verify(?:\s+(?:this|that|it|your))?|istraži|istrazi|provjeri\s+na\s+netu|idi\s+na\s+google|jesi\s+siguran)\b/i;

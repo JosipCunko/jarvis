@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, type RefObject } from "react";
-
-const BAR_COUNT = 10;
-const SMOOTHING = 0.35;
-const MIN_HEIGHT = 0.08;
-const VOICE_MIN_HZ = 110;
-const VOICE_MAX_HZ = 3200;
-const NOISE_FLOOR = 26;
+import {
+  BAR_COUNT,
+  MIN_HEIGHT,
+  NOISE_FLOOR,
+  SMOOTHING,
+  VOICE_MAX_HZ,
+  VOICE_MIN_HZ,
+} from "@/app/_lib/utils";
 
 function bandEdges(sampleRate: number, binCount: number) {
   const fftSize = binCount * 2;

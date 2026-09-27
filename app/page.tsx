@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import CommandCenter from "@/app/_components/CommandCenter";
-import { isGoogleConfigured, isSpeechCloudConfigured, isThesysConfigured } from "@/app/_lib/config";
+import { getJarvisTimezone, isGoogleConfigured, isSpeechCloudConfigured, isThesysConfigured } from "@/app/_lib/config";
 import { getMissionStore } from "@/app/_lib/mission-store";
 import { getSessionUser } from "@/app/_lib/session";
+import { promptDayKey } from "@/app/_lib/time";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ export default async function Home() {
       googleConfigured={isGoogleConfigured()}
       googleEmail={google?.email ?? null}
       speechCloud={isSpeechCloudConfigured()}
+      promptDay={promptDayKey(getJarvisTimezone())}
     />
   );
 }

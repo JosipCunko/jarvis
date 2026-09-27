@@ -15,8 +15,7 @@ import {
 } from "firebase/auth";
 import { signIn as nextAuthSignIn, signOut as nextAuthSignOut } from "next-auth/react";
 import { auth } from "./firebase";
-
-const POST_AUTH_CALLBACK_URL = "/";
+import { POST_AUTH_CALLBACK_URL } from "@/app/_lib/utils";
 
 function requireAuth() {
   if (!auth) throw new Error("Firebase is not configured.");

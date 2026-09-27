@@ -1,3 +1,5 @@
+import { SPEECH_LIMIT } from "@/app/_lib/utils";
+
 const FENCE_RE = /```(?:openui-lang|openui)?\s*\n?([\s\S]*?)```/g;
 
 export function looksLikeGenUi(content: string) {
@@ -505,7 +507,6 @@ export function toC1Response(content: string) {
   return `<custommarkdown>${escapeXml(prettifyFencedCode(content))}</custommarkdown>`;
 }
 
-const SPEECH_LIMIT = 4000;
 const STYLE_TOKEN =
   /^(small|default|large|small-heavy|large-heavy|primary|secondary|info|warning|error|success|neutral|danger|clear|card|sunk|sm|md|lg|single)$/i;
 

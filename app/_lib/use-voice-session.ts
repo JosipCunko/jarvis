@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { acceptSpeech, browserSpeechLang, type SpeechLanguage } from "@/app/_lib/speech-lang";
 import { useSpeechRecognition } from "@/app/_lib/use-speech-recognition";
-
-const SILENCE_MS = 2000;
-const HOLDING_MS = 400;
-const MAX_UTTERANCE_MS = 45_000;
-const POLL_MS = 50;
-const MIN_SPEECH_MS = 160;
+import {
+  HOLDING_MS,
+  MAX_UTTERANCE_MS,
+  MIN_SPEECH_MS,
+  POLL_MS,
+  SILENCE_MS,
+} from "@/app/_lib/utils";
 
 export type VoicePhase = "idle" | "listening" | "holding" | "transcribing";
 

@@ -1,10 +1,7 @@
 import "server-only";
+import { SPEAK_INSTRUCTIONS, TRANSCRIBE_PROMPT } from "@/app/_lib/utils";
 
-const SPEAK_INSTRUCTIONS = "Speak calmly and clearly, in the language of the text.";
-
-/** Steers the transcriber toward Latin Croatian and digit dates and times. */
-export const TRANSCRIBE_PROMPT =
-  "The speaker uses Croatian or English. Write Croatian in Latin letters, never Cyrillic. When they say a date or a clock time, write it with digits.";
+export { TRANSCRIBE_PROMPT };
 
 export type SpeechBackend = {
   provider: "openrouter" | "openai";

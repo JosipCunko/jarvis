@@ -1,19 +1,9 @@
 import { addDays, differenceInCalendarWeeks, startOfDay } from "date-fns";
 import { parseWhen } from "@/app/_lib/time";
 import type { MissionKind, MissionRepeat, RepeatFrequency } from "@/app/_types/jarvis";
+import { MISSION_KINDS, NEW_MISSION_PROMPT } from "@/app/_lib/utils";
 
-export const MISSION_KINDS = [
-  "assignment",
-  "exam",
-  "class",
-  "study",
-  "reading",
-  "project",
-  "errand",
-] as const satisfies readonly MissionKind[];
-
-export const NEW_MISSION_PROMPT =
-  "I want to create a new mission. Show me the ways I can add one. Do not create anything yet.";
+export { MISSION_KINDS, NEW_MISSION_PROMPT };
 
 const KIND_LABEL: Record<MissionKind, string> = {
   assignment: "Assignment",

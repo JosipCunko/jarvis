@@ -37,4 +37,4 @@ export function getJarvisTimezone() {
   return process.env.JARVIS_TIMEZONE || "Europe/Zagreb";
 }
 
-export const DEMO_USER_ID = "demo-operator";
+export { DEMO_USER_ID } from "./utils";

@@ -53,6 +53,13 @@ import { cn } from "@/app/_lib/cn";
 import { useLocalWeather } from "@/app/_lib/use-local-weather";
 import { useVoiceSession } from "@/app/_lib/use-voice-session";
 import { endOfToday, formatClock, formatDateLabel, formatWhen, startOfToday } from "@/app/_lib/time";
+import {
+  isDailyPromptBlocked,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS,
+  PROMPT_LIMIT_MESSAGE,
+  TAP_SILENCE_MS,
+} from "@/app/_lib/utils";
 import type { CreditsSnapshot } from "@/app/_types/credits";
 import type {
   ChatAttachment,
@@ -99,10 +106,6 @@ const QUICK = [
   { label: "Start Voice Chat", prompt: "" },
 ] as const;
 
-const MAX_ATTACHMENTS = 3;
-const MAX_ATTACHMENT_BYTES = 4.5 * 1024 * 1024;
-const TAP_SILENCE_MS = 4000;
-
 function SidebarPanel({
   animated = false,
   showClose = false,
@@ -117,6 +120,7 @@ function SidebarPanel({
   speechSupported,
   voiceLive,
   focusMode,
+  promptsBlocked,
   analyserRef,
   onClose,
   onNav,
@@ -136,6 +140,7 @@ function SidebarPanel({
   speechSupported: boolean;
   voiceLive: boolean;
   focusMode: boolean;
+  promptsBlocked: boolean;
   analyserRef: RefObject<AnalyserNode | null>;
   onClose?: () => void;
   onNav: (id: string, prompt?: string) => void;
@@ -216,7 +221,8 @@ function SidebarPanel({
         shape="pill"
         active={voiceLive}
         aria-pressed={voiceLive}
-        title={voiceLive ? "Stop listening" : "Speak a command"}
+        disabled={promptsBlocked}
+        title={promptsBlocked ? "Daily prompt limit reached" : voiceLive ? "Stop listening" : "Speak a command"}
         onClick={onToggleListening}
         className="mt-4 w-full"
       >
@@ -324,6 +330,7 @@ export default function CommandCenter({
   googleConfigured,
   googleEmail: initialGoogleEmail,
   speechCloud,
+  promptDay,
 }: {
   operatorName: string;
   initialSnapshot: MissionSnapshot;
@@ -331,6 +338,7 @@ export default function CommandCenter({
   googleConfigured: boolean;
   googleEmail: string | null;
   speechCloud: boolean;
+  promptDay: string;
 }) {
   const router = useRouter();
   const { data: session } = useSession();
@@ -341,6 +349,9 @@ export default function CommandCenter({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState("");
   const [pending, setPending] = useState(false);
+  const [promptsBlocked, setPromptsBlocked] = useState(() =>
+    isDailyPromptBlocked(initialSnapshot.user, promptDay),
+  );
   const [researching, setResearching] = useState(false);
   const [chatId, setChatId] = useState<string | null>(null);
   const [threads, setThreads] = useState<ChatSummary[]>([]);
@@ -466,6 +477,12 @@ export default function CommandCenter({
   });
 
   voicePhaseRef.current = voicePhase;
+
+  useEffect(() => {
+    if (!promptsBlocked) return;
+    setVoiceChat(false);
+    cancelVoice();
+  }, [promptsBlocked, cancelVoice]);
 
   useEffect(() => {
     if (voiceChat || !listening || heardSpeech) return;
@@ -613,6 +630,7 @@ export default function CommandCenter({
   }
 
   async function addFiles(files: File[]) {
+    if (promptsBlocked) return;
     const images = files.filter((file) => file.type.startsWith("image/"));
     if (images.length === 0) return;
     const remaining = MAX_ATTACHMENTS - attachments.length;
@@ -711,6 +729,10 @@ export default function CommandCenter({
     const content = text.trim();
     const fresh = options?.fresh === true;
     const files = fresh ? [] : attachments;
+    if (promptsBlocked) {
+      notifyInfo(PROMPT_LIMIT_MESSAGE);
+      return;
+    }
     if ((!content && files.length === 0) || (pending && !fresh)) return;
     revealConversation();
     const requestId = ++submitRequestRef.current;
@@ -747,8 +769,17 @@ export default function CommandCenter({
       });
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
+        if (response.status === 429) {
+          setPromptsBlocked(true);
+          setMessages(fresh ? [] : messages);
+          setInput(content);
+          setAttachments(files);
+          notifyInfo(errorData?.error?.message ?? PROMPT_LIMIT_MESSAGE);
+          return;
+        }
         throw new Error(errorData?.error?.message ?? "AI request failed");
       }
+      if (response.headers.get("X-Prompts-Blocked") === "1") setPromptsBlocked(true);
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       if (!reader) throw new Error("No response body");
@@ -775,6 +806,7 @@ export default function CommandCenter({
               setResearching(parsed.status === "searching");
             } else if (parsed.type === "done") {
               setChatId(parsed.chatId);
+              if (parsed.promptsBlocked) setPromptsBlocked(true);
             } else if (parsed.type === "error") {
               throw new Error(parsed.error);
             }
@@ -855,6 +887,10 @@ export default function CommandCenter({
   }
 
   function toggleListening(mode: "command" | "chat" = "command") {
+    if (promptsBlocked) {
+      notifyInfo(PROMPT_LIMIT_MESSAGE);
+      return;
+    }
     stopPlayback();
     if (speakingRef.current) {
       setSpeaking(false);
@@ -883,7 +919,7 @@ export default function CommandCenter({
   }
 
   useEffect(() => {
-    if (!voiceChat) return;
+    if (!voiceChat || promptsBlocked) return;
     if (pending || speaking) {
       if (voicePhaseRef.current !== "transcribing") cancelVoice();
       return;
@@ -894,7 +930,7 @@ export default function CommandCenter({
       void startVoice();
     }, 300);
     return () => window.clearTimeout(id);
-  }, [pending, speaking, voiceChat, listening, cancelVoice, startVoice]);
+  }, [pending, speaking, voiceChat, listening, promptsBlocked, cancelVoice, startVoice]);
 
   function startNewConversation() {
     submitRequestRef.current += 1;
@@ -998,6 +1034,7 @@ export default function CommandCenter({
     speechSupported,
     voiceLive,
     focusMode,
+    promptsBlocked,
     analyserRef,
     onNav,
     onToggleListening: () => toggleListening("command"),
@@ -1394,7 +1431,8 @@ export default function CommandCenter({
                     <button
                       type="button"
                       aria-label={`Remove ${file.name}`}
-                      className="absolute -top-1 -right-1 rounded-full bg-hud text-muted hover:text-danger"
+                      disabled={promptsBlocked}
+                      className="absolute -top-1 -right-1 rounded-full bg-hud text-muted hover:text-danger disabled:opacity-50"
                       onClick={() =>
                         setAttachments((current) => current.filter((_, i) => i !== index))
                       }
@@ -1407,20 +1445,22 @@ export default function CommandCenter({
             ) : null}
             <div className="flex items-center gap-3">
             <Button
-              title={voiceLive ? "Stop listening" : "Speak a command"}
+              title={promptsBlocked ? "Daily prompt limit reached" : voiceLive ? "Stop listening" : "Speak a command"}
               aria-label={voiceLive ? "Stop listening" : "Start listening"}
               aria-pressed={voiceLive}
               active={voiceLive}
+              disabled={promptsBlocked}
               onClick={() => toggleListening(voiceChat ? "chat" : "command")}
             >
               <Mic size={18} className={voiceLive ? "animate-[jarvis-pulse_1.2s_ease-in-out_infinite]" : undefined} />
             </Button>
             <Button
               shape="pill"
-              title={speakReplies ? "JARVIS microphone is on" : "JARVIS microphone is off"}
+              title={promptsBlocked ? "Daily prompt limit reached" : speakReplies ? "JARVIS microphone is on" : "JARVIS microphone is off"}
               aria-label={speakReplies ? "Turn off the JARVIS microphone" : "Turn on the JARVIS microphone"}
               aria-pressed={speakReplies}
               active={speakReplies}
+              disabled={promptsBlocked}
               onClick={() => {
                 if (speakReplies) {
                   stopPlayback();
@@ -1445,7 +1485,9 @@ export default function CommandCenter({
                 }}
                 onPaste={onPaste}
                 placeholder={
-                  speaking
+                  promptsBlocked
+                    ? "Daily prompt limit reached"
+                    : speaking
                     ? "Speaking…"
                     : pending || voicePhase === "transcribing"
                       ? "Working…"
@@ -1457,7 +1499,7 @@ export default function CommandCenter({
                           ? "Add a message, then send…"
                           : "I am listening…"
                 }
-                disabled={pending}
+                disabled={pending || promptsBlocked}
                 className="w-full bg-transparent text-center text-sm text-ink outline-none placeholder:text-muted disabled:opacity-60"
               />
             </div>
@@ -1471,8 +1513,9 @@ export default function CommandCenter({
               </Button>
             ) : null}
             <Button
-              title="Attach image"
+              title={promptsBlocked ? "Daily prompt limit reached" : "Attach image"}
               aria-label="Attach image"
+              disabled={promptsBlocked}
               onClick={() => fileRef.current?.click()}
             >
               <Paperclip size={16} />
@@ -1481,7 +1524,8 @@ export default function CommandCenter({
               type={generating ? "button" : "submit"}
               variant="solid"
               aria-label={generating ? "Stop JARVIS" : "Send"}
-              title={generating ? "Stop" : "Talk to JARVIS"}
+              title={generating ? "Stop" : promptsBlocked ? "Daily prompt limit reached" : "Talk to JARVIS"}
+              disabled={promptsBlocked && !generating}
               onClick={generating ? stopGeneration : undefined}
             >
               {generating ? (

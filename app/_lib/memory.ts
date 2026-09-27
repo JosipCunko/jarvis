@@ -1,10 +1,7 @@
 import type { MemoryKind, MemoryNote } from "@/app/_types/jarvis";
+import { MEMORY_KINDS, PROMPT_MEMORY_CHAR_CAP, STALE_MONTHS } from "@/app/_lib/utils";
 
-export const MEMORY_KINDS = ["fact", "preference", "instruction"] as const;
-
-export const PROMPT_MEMORY_CHAR_CAP = 1500;
-
-const STALE_MONTHS = 3;
+export { MEMORY_KINDS, PROMPT_MEMORY_CHAR_CAP };
 
 export function parseMemoryKind(value: unknown): MemoryKind | undefined {
   if (value === "fact" || value === "preference" || value === "instruction") return value;

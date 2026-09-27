@@ -4,15 +4,7 @@ import type {
   OpenRouterCreditStatus,
   ThesysCreditStatus,
 } from "@/app/_types/credits";
-
-const CACHE_MS = 60_000;
-const LOW_USD = 1;
-const OPENROUTER_ORIGIN = "https://openrouter.ai/api/v1";
-const THESYS_PROBES = [
-  "https://api.thesys.dev/v1/credits",
-  "https://api.thesys.dev/v1/billing",
-  "https://api.thesys.dev/v1/usage",
-];
+import { CACHE_MS, LOW_USD, OPENROUTER_ORIGIN, THESYS_PROBES } from "@/app/_lib/utils";
 
 const FREE_KEYS = new Set([
   "free_credits",
