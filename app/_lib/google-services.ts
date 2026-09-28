@@ -1,6 +1,6 @@
 import "server-only";
 import { getJarvisTimezone } from "@/app/_lib/config";
-import { zonedDayRangeIso } from "@/app/_lib/time";
+import { zonedAheadRangeIso, zonedDateParts, zonedDayRangeIso, zonedYmdRangeIso } from "@/app/_lib/time";
 import { googleApi } from "./google-oauth";
 import { getMissionStore } from "@/app/_lib/mission-store";
 import type { ChatAttachment } from "@/app/_types/jarvis";
@@ -59,14 +59,136 @@ function eventStamp(event: CalendarEvent) {
   return event.start?.dateTime || event.start?.date || "";
 }
 
-export async function listCalendarEvents(
+const TITLE_STOP = new Set([
+  "a",
+  "an",
+  "the",
+  "at",
+  "on",
+  "to",
+  "for",
+  "and",
+  "or",
+  "of",
+  "my",
+  "me",
+  "in",
+  "with",
+  "from",
+  "u",
+  "na",
+  "za",
+  "i",
+  "s",
+  "sa",
+  "od",
+  "do",
+  "mi",
+  "moj",
+  "moja",
+  "moje",
+  "iz",
+]);
+
+const TITLE_FILLER = new Set([
+  "meeting",
+  "appointment",
+  "reminder",
+  "event",
+  "call",
+  "session",
+  "sastanak",
+  "termin",
+  "podsjetnik",
+]);
+
+function foldTitle(title: string) {
+  return title
+    .toLowerCase()
+    .replace(/[čć]/g, "c")
+    .replace(/ž/g, "z")
+    .replace(/š/g, "s")
+    .replace(/đ/g, "d")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function contentTokens(title: string) {
+  return foldTitle(title)
+    .split(" ")
+    .filter((token) => token.length > 2 && !TITLE_STOP.has(token));
+}
+
+function tokensMatch(left: string, right: string) {
+  if (left === right) return true;
+  const shorter = Math.min(left.length, right.length);
+  if (shorter < 5) return false;
+  let shared = 0;
+  while (shared < shorter && left[shared] === right[shared]) shared += 1;
+  const longer = Math.max(left.length, right.length);
+  return shared >= 5 && shared / shorter >= 0.8 && longer - shared <= 3;
+}
+
+function countTokenOverlap(left: string[], right: string[]) {
+  const used = new Set<number>();
+  let overlap = 0;
+  for (const token of left) {
+    const index = right.findIndex((other, item) => !used.has(item) && tokensMatch(token, other));
+    if (index < 0) continue;
+    used.add(index);
+    overlap += 1;
+  }
+  return overlap;
+}
+
+function titlesVerySimilar(left: string, right: string) {
+  const a = foldTitle(left);
+  const b = foldTitle(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length <= b.length ? b : a;
+  if (shorter.length >= 4 && new RegExp(`(?:^|\\s)${shorter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`).test(longer)) {
+    return true;
+  }
+  const ta = contentTokens(left);
+  const tb = contentTokens(right);
+  if (ta.length === 0 || tb.length === 0) return false;
+  const overlap = countTokenOverlap(ta, tb);
+  if (overlap === 0) return false;
+  const union = ta.length + tb.length - overlap;
+  if (union > 0 && overlap / union >= 0.75) return true;
+  const onlyA = ta.filter((token) => !tb.some((other) => tokensMatch(token, other)));
+  const onlyB = tb.filter((token) => !ta.some((other) => tokensMatch(token, other)));
+  return onlyA.every((token) => TITLE_FILLER.has(token)) && onlyB.every((token) => TITLE_FILLER.has(token));
+}
+
+function eventCoversDay(event: CalendarEvent, day: string, timeZone: string) {
+  const startDate = event.start?.date;
+  if (startDate) {
+    const endDate = event.end?.date || addDaysToDate(startDate, 1);
+    return startDate <= day && day < endDate;
+  }
+  const stamp = event.start?.dateTime;
+  if (!stamp) return false;
+  const parsed = new Date(stamp);
+  if (Number.isNaN(parsed.getTime())) return stamp.slice(0, 10) === day;
+  const parts = zonedDateParts(timeZone, parsed);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}` === day;
+}
+
+async function findSimilarCalendarEvent(
   userId: string,
-  options: { days?: number; query?: string } = {},
+  timeZone: string,
+  input: { title: string; start: string },
 ) {
-  const timeZone = getJarvisTimezone();
-  const days = Math.min(Math.max(options.days ?? 7, 1), 31);
-  const timeMin = new Date().toISOString();
-  const timeMax = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+  const day = input.start.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const { timeMin, timeMax } = zonedYmdRangeIso(timeZone, day);
   const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
   url.searchParams.set("singleEvents", "true");
   url.searchParams.set("orderBy", "startTime");
@@ -74,18 +196,64 @@ export async function listCalendarEvents(
   url.searchParams.set("timeMax", timeMax);
   url.searchParams.set("maxResults", "100");
   url.searchParams.set("timeZone", timeZone);
-  if (options.query) url.searchParams.set("q", options.query);
   const data = (await googleApi<{ items?: CalendarEvent[] }>(userId, url.toString())) ?? {
     items: [],
   };
-  return (data.items ?? []).map((event: CalendarEvent) => ({
-    id: event.id,
-    title: event.summary || "(no title)",
-    start: eventStamp(event),
-    end: event.end?.dateTime || event.end?.date || "",
-    location: event.location || "",
-    link: event.htmlLink || "",
-  }));
+  for (const event of data.items ?? []) {
+    if (event.status === "cancelled") continue;
+    if (!eventCoversDay(event, day, timeZone)) continue;
+    const title = event.summary || "";
+    if (!titlesVerySimilar(input.title, title)) continue;
+    const start = eventStamp(event);
+    const end = event.end?.dateTime || event.end?.date || "";
+    return {
+      id: event.id,
+      title: title || "(no title)",
+      start,
+      end,
+      link: event.htmlLink || "",
+    };
+  }
+  return null;
+}
+
+export async function listCalendarEvents(
+  userId: string,
+  options: { days?: number; query?: string } = {},
+) {
+  const timeZone = getJarvisTimezone();
+  const days = Math.min(Math.max(options.days ?? 7, 1), 31);
+  const { timeMin, timeMax } = zonedAheadRangeIso(timeZone, days);
+  const items: CalendarEvent[] = [];
+  let pageToken = "";
+  for (let page = 0; page < 8; page += 1) {
+    const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
+    url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("orderBy", "startTime");
+    url.searchParams.set("timeMin", timeMin);
+    url.searchParams.set("timeMax", timeMax);
+    url.searchParams.set("maxResults", "250");
+    url.searchParams.set("timeZone", timeZone);
+    if (options.query) url.searchParams.set("q", options.query);
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const data = (await googleApi<{ items?: CalendarEvent[]; nextPageToken?: string }>(
+      userId,
+      url.toString(),
+    )) ?? { items: [] };
+    items.push(...(data.items ?? []));
+    pageToken = data.nextPageToken ?? "";
+    if (!pageToken) break;
+  }
+  return items
+    .filter((event) => event.status !== "cancelled")
+    .map((event: CalendarEvent) => ({
+      id: event.id,
+      title: event.summary || "(no title)",
+      start: eventStamp(event),
+      end: event.end?.dateTime || event.end?.date || "",
+      location: event.location || "",
+      link: event.htmlLink || "",
+    }));
 }
 
 function formatEventWhen(start: string, end: string, timeZone: string) {
@@ -157,13 +325,25 @@ export async function createCalendarEvent(
   if (!start) throw new Error("Event start is required.");
   const reminder = input.reminder_minutes ?? 30;
   const isAllDay = /^\d{4}-\d{2}-\d{2}$/.test(start);
+  const end = isAllDay
+    ? input.end || addDaysToDate(start, 1)
+    : input.end || addMinutesToLocal(start, input.duration_minutes ?? 60);
+  const existing = await findSimilarCalendarEvent(userId, timeZone, { title, start });
+  if (existing) {
+    const name = existing.title === "(no title)" ? "This event" : existing.title;
+    return {
+      duplicate: true as const,
+      message: `${name} is already in the calendar, so I didn't create anything new in your schedule.`,
+      existing,
+    };
+  }
   const body = isAllDay
     ? {
         summary: title,
         description: input.description,
         location: input.location,
         start: { date: start },
-        end: { date: input.end || addDaysToDate(start, 1) },
+        end: { date: end },
         reminders: {
           useDefault: false,
           overrides: [{ method: "popup", minutes: reminder }],
@@ -175,7 +355,7 @@ export async function createCalendarEvent(
         location: input.location,
         start: { dateTime: start, timeZone },
         end: {
-          dateTime: input.end || addMinutesToLocal(start, input.duration_minutes ?? 60),
+          dateTime: end,
           timeZone,
         },
         reminders: {

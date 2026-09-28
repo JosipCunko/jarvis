@@ -6,10 +6,9 @@ import { differenceInCalendarDays } from "date-fns";
 import { adminDb } from "./admin";
 import { getJarvisTimezone, isFirebaseAdminConfigured } from "./config";
 import { DAILY_PROMPT_LIMIT, isAdminEmail } from "./utils";
-import { nextRepeatDue, normalizeRepeat } from "./mission-repeat";
 import { resolveTaskAppearance } from "./task-appearance";
 import { normalizeMemoryText } from "./memory";
-import { parseWhen, promptDayKey, startOfToday } from "./time";
+import { parseDueAt, promptDayKey, startOfToday } from "./time";
 import type {
   AppUser,
   ChatMessage,
@@ -20,7 +19,6 @@ import type {
   MemoryPatch,
   MissionCompletion,
   MissionKind,
-  MissionRepeat,
   MissionSnapshot,
   MissionStore,
   Task,
@@ -116,23 +114,24 @@ function resolveKind(input: MissionKind | null | undefined, existing?: MissionKi
   return input ?? existing;
 }
 
-function resolveRepeat(input: MissionRepeat | null | undefined, existing?: MissionRepeat) {
-  if (input === null) return undefined;
-  if (input) return normalizeRepeat(input);
-  return existing ? normalizeRepeat(existing) : undefined;
-}
-
 function blankToUndefined(value?: string) {
   const text = value?.trim();
   return text ? text : undefined;
 }
 
 function compactTask(task: Task) {
-  const copy = { ...task };
+  const copy = { ...task } as Task & Record<string, unknown>;
+  delete copy.repeat;
+  delete copy.seriesId;
   (Object.keys(copy) as (keyof Task)[]).forEach((key) => {
     if (copy[key] === undefined) delete copy[key];
   });
   return copy;
+}
+
+function clipChatTitle(value: string, limit = 60) {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit - 3)}...`;
 }
 
 function asTaskStatus(value: unknown): TaskStatus {
@@ -304,23 +303,19 @@ class FirestoreMissionStore implements MissionStore {
     });
     const status = asTaskStatus(input.status ?? existing?.status);
     const id = existing?.id ?? input.id ?? randomUUID();
-    const repeat = resolveRepeat(input.repeat, existing?.repeat);
-    const seriesId = repeat ? existing?.seriesId ?? input.seriesId ?? id : existing?.seriesId;
     const task = compactTask({
       id,
       userId,
       title,
       status,
       priority: asPriority(input.priority ?? existing?.priority),
-      dueAt: parseWhen(input.dueAt) ?? existing?.dueAt,
+      dueAt: input.dueAt == null ? existing?.dueAt : parseDueAt(input.dueAt) ?? existing?.dueAt,
       tags: input.tags ?? existing?.tags ?? [],
       notes: input.notes === null ? undefined : input.notes ?? existing?.notes,
       icon: appearance.icon,
       color: appearance.color,
       kind: resolveKind(input.kind, existing?.kind),
       course: input.course === null ? undefined : blankToUndefined(input.course ?? existing?.course),
-      repeat,
-      seriesId,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       completedAt: status === "done" ? existing?.completedAt ?? now : undefined,
@@ -339,34 +334,14 @@ class FirestoreMissionStore implements MissionStore {
     if (!existing) throw new Error("Mission not found.");
     if (existing.status === "done") return { task: existing, next: null };
     const now = Date.now();
-    const seriesId = existing.repeat ? existing.seriesId ?? existing.id : existing.seriesId;
     const task = compactTask({
       ...existing,
-      seriesId,
       status: "done",
       completedAt: now,
       updatedAt: now,
     });
     await setCollectionDoc("tasks", task);
-    const nextAt = existing.repeat ? nextRepeatDue(existing.dueAt, existing.repeat, now) : undefined;
-    if (nextAt == null || !seriesId) return { task, next: null };
-    const peers = await listCollection("tasks", userId);
-    const hasOpen = peers.some(
-      (item) => item.id !== existing.id && item.seriesId === seriesId && item.status !== "done",
-    );
-    if (hasOpen) return { task, next: null };
-    const next = compactTask({
-      ...existing,
-      id: randomUUID(),
-      seriesId: seriesId ?? existing.id,
-      status: "open",
-      dueAt: nextAt,
-      createdAt: now,
-      updatedAt: now,
-      completedAt: undefined,
-    });
-    await setCollectionDoc("tasks", next);
-    return { task, next };
+    return { task, next: null };
   }
 
   async rescheduleTask(userId: string, id: string, dueAt: number) {
@@ -429,6 +404,30 @@ class FirestoreMissionStore implements MissionStore {
   async listMemories(userId: string) {
     const notes = await listCollection("memories", userId);
     return notes.sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  async listAllMemories() {
+    await ensureMemory();
+    if (firestoreEnabled()) {
+      const snap = await adminDb.collectionGroup("memories").get();
+      const notes: MemoryNote[] = [];
+      for (const doc of snap.docs) {
+        const data = doc.data() as Partial<MemoryNote>;
+        const userId = data.userId || doc.ref.parent.parent?.id;
+        if (!userId) continue;
+        notes.push({
+          id: doc.id,
+          userId,
+          text: data.text || "",
+          createdAt: typeof data.createdAt === "number" ? data.createdAt : 0,
+          updatedAt: typeof data.updatedAt === "number" ? data.updatedAt : undefined,
+          kind: data.kind,
+          pinned: data.pinned,
+        });
+      }
+      return notes.sort((a, b) => b.createdAt - a.createdAt);
+    }
+    return [...memory().memories.values()].sort((a, b) => b.createdAt - a.createdAt);
   }
 
   async recall(userId: string, query?: string) {
@@ -504,7 +503,7 @@ class FirestoreMissionStore implements MissionStore {
       title:
         title ||
         existing?.title ||
-        firstUser?.content.slice(0, 60) ||
+        (firstUser?.content ? clipChatTitle(firstUser.content) : "") ||
         firstUser?.attachments?.[0]?.name ||
         "Conversation",
       messages: messages.map((message) => ({

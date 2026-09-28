@@ -5,7 +5,7 @@ import { ListChecks, Plus, Search } from "lucide-react";
 import { Button } from "@/app/_components/Button";
 import { TaskCard } from "@/app/_components/TaskCard";
 import { notifyError, notifySuccess } from "@/app/_components/notify";
-import { NEW_MISSION_PROMPT } from "@/app/_lib/mission-repeat";
+import { NEW_MISSION_PROMPT } from "@/app/_lib/utils";
 import { cn } from "@/app/_lib/cn";
 import { startOfToday } from "@/app/_lib/time";
 import type { Task, TaskStatus } from "@/app/_types/jarvis";

@@ -38,8 +38,27 @@ export const MISSION_KINDS = [
   "project",
   "errand",
 ] as const satisfies readonly MissionKind[];
+
+const KIND_LABEL: Record<MissionKind, string> = {
+  assignment: "Assignment",
+  exam: "Exam",
+  class: "Class",
+  study: "Study",
+  reading: "Reading",
+  project: "Project",
+  errand: "Errand",
+};
+
+export function missionKindLabel(kind?: MissionKind) {
+  return kind ? KIND_LABEL[kind] : "";
+}
+
+export function parseMissionKind(value: unknown): MissionKind | undefined {
+  return MISSION_KINDS.find((kind) => kind === value);
+}
 export const NEW_MISSION_PROMPT =
   "I want to create a new mission. Show me the ways I can add one. Do not create anything yet.";
+
 export const MEMORY_KINDS = ["fact", "preference", "instruction"] as const;
 export const PROMPT_MEMORY_CHAR_CAP = 1500;
 export const STALE_MONTHS = 3;

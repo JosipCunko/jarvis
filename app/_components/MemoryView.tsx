@@ -171,8 +171,8 @@ export function MemoryView({
   }
 
   return (
-    <div className="mx-auto grid max-w-[1600px] gap-3">
-      <section className="hud-panel rounded-xl p-4">
+    <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col gap-3">
+      <section className="hud-panel shrink-0 rounded-xl p-4">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-mono text-[10px] tracking-[0.28em] text-muted">MEMORY</h2>
@@ -277,7 +277,7 @@ export function MemoryView({
         </div>
       </section>
 
-      <section className="hud-panel rounded-xl p-4">
+      <section className="hud-panel min-h-0 flex-1 overflow-y-auto rounded-xl p-4">
         {memories.length === 0 ? (
           <p className="text-sm text-muted">
             No stored notes yet. Tell JARVIS to remember something, or add one here.

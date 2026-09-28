@@ -8,7 +8,7 @@ import JarvisMark from "@/app/_components/JarvisMark";
 import { notifyError } from "@/app/_components/notify";
 import { VoiceBars } from "@/app/_components/voice-bars";
 import { cn } from "@/app/_lib/cn";
-import { endOfToday, formatWhen, startOfToday } from "@/app/_lib/time";
+import { endOfToday, formatMissionDue, startOfToday } from "@/app/_lib/time";
 import type { CreditsSnapshot } from "@/app/_types/credits";
 import type { MemoryNote, Task } from "@/app/_types/jarvis";
 
@@ -403,7 +403,7 @@ export function AiCoreView({
           <p className="mt-3 line-clamp-2 font-mono text-[10px] tracking-widest text-muted">
             {done} complete
             {nextMission
-              ? ` · next ${nextMission.title}${nextMission.dueAt ? ` · ${formatWhen(nextMission.dueAt)}` : ""}`
+              ? ` · next ${nextMission.title}${nextMission.dueAt ? ` · ${formatMissionDue(nextMission.dueAt)}` : ""}`
               : ""}
           </p>
         </Frame>

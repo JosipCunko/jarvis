@@ -5,9 +5,9 @@ import { Check, Play, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/app/_components/Button";
 import { TaskGlyph } from "@/app/_components/TaskGlyph";
 import { cn } from "@/app/_lib/cn";
-import { missionKindLabel, repeatLabel } from "@/app/_lib/mission-repeat";
+import { missionKindLabel } from "@/app/_lib/utils";
 import { resolveTaskAppearance, taskSwatch } from "@/app/_lib/task-appearance";
-import { endOfToday, formatWhen, startOfToday } from "@/app/_lib/time";
+import { endOfToday, formatMissionDue, formatWhen, startOfToday } from "@/app/_lib/time";
 import type { Task, TaskPriority, TaskStatus } from "@/app/_types/jarvis";
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -35,9 +35,8 @@ export function TaskCard({
   const dueText = task.dueAt
     ? done
       ? `Closed ${formatWhen(task.completedAt ?? task.updatedAt)}`
-      : formatWhen(task.dueAt)
+      : formatMissionDue(task.dueAt)
     : "No due date";
-  const cadence = repeatLabel(task.repeat);
   const kindCourse = [missionKindLabel(task.kind), task.course].filter(Boolean).join(" · ");
   const [notesOpen, setNotesOpen] = useState(false);
 
@@ -109,7 +108,6 @@ export function TaskCard({
               )}
             >
               {dueText}
-              {cadence ? ` · ${cadence}` : ""}
             </p>
             <div className="flex items-center gap-2">
               <button

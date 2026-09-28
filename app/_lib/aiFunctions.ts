@@ -11,31 +11,11 @@ import {
 import { readWhatsAppContacts, readWhatsAppMessages, sendWhatsAppMessage } from "./whatsapp";
 import { getProviderCredits } from "./credits";
 import { researchWeb } from "./web-research";
-import {
-  MISSION_KINDS,
-  missionKindLabel,
-  parseMissionKind,
-  parseRepeatArg,
-  repeatLabel,
-} from "./mission-repeat";
+import { MISSION_KINDS, missionKindLabel, parseMissionKind } from "./utils";
 import { resolveTaskAppearance, TASK_COLOR_IDS, TASK_ICON_IDS, taskAppearanceGuide } from "./task-appearance";
 import { parseMemoryKind } from "./memory";
-import { formatWhen, parseWhen, startOfToday, endOfToday } from "./time";
+import { formatMissionDue, formatWhen, parseDueAt, specifiesStartHour, startOfToday, endOfToday } from "./time";
 import type { ChatAttachment, FunctionResult, Task, TaskPriority } from "@/app/_types/jarvis";
-
-function repeatParameters() {
-  return {
-    type: "object",
-    description:
-      "Omit for a one-off. frequency none stops repeating. weekdays is only for weekly: 0 is Sunday through 6 Saturday.",
-    properties: {
-      frequency: { type: "string", enum: ["daily", "weekly", "weekdays", "none"] },
-      interval: { type: "number", description: "Every N days or weeks. Default 1." },
-      weekdays: { type: "array", items: { type: "number" } },
-      until: { type: "string", description: "Last date this repeat may occur. YYYY-MM-DD or ISO datetime." },
-    },
-  };
-}
 
 export const AI_FUNCTIONS = [
   {
@@ -68,7 +48,7 @@ export const AI_FUNCTIONS = [
   },
   {
     name: "create_mission",
-    description: `Create a new mission. Only you can create missions. Always choose icon and color from the library so the card matches the work. Set kind and course when you know them. Omit repeat for a one-off. ${taskAppearanceGuide()}`,
+    description: `Create a new mission. Only you can create missions. Missions do not repeat. Always choose icon and color from the library so the card matches the work. Set kind and course when you know them. A date with no clock time is due at the end of that day. ${taskAppearanceGuide()}`,
     parameters: {
       type: "object",
       properties: {
@@ -79,7 +59,6 @@ export const AI_FUNCTIONS = [
         priority: { type: "string", enum: ["low", "medium", "high"] },
         tags: { type: "array", items: { type: "string" } },
         notes: { type: "string" },
-        repeat: repeatParameters(),
         icon: {
           type: "string",
           enum: [...TASK_ICON_IDS],
@@ -97,7 +76,7 @@ export const AI_FUNCTIONS = [
   {
     name: "update_mission",
     description:
-      "Update an existing mission's title, course, kind, due date, priority, notes, tags, icon, color, or repeat. Use this to reschedule. Pass repeat.frequency none to stop repeating. You cannot mark it complete or delete it with this tool.",
+      "Update an existing mission's title, course, kind, due date, priority, notes, tags, icon, or color. Use this to reschedule. You cannot mark it complete or delete it with this tool.",
     parameters: {
       type: "object",
       properties: {
@@ -109,7 +88,6 @@ export const AI_FUNCTIONS = [
         priority: { type: "string", enum: ["low", "medium", "high"] },
         tags: { type: "array", items: { type: "string" } },
         notes: { type: "string" },
-        repeat: repeatParameters(),
         icon: { type: "string", enum: [...TASK_ICON_IDS] },
         color: { type: "string", enum: [...TASK_COLOR_IDS] },
       },
@@ -119,7 +97,7 @@ export const AI_FUNCTIONS = [
   {
     name: "complete_mission",
     description:
-      "Mark a mission done only when the operator explicitly says it is finished. Prefer mission_id; otherwise match by title. If it repeats, the next occurrence is created automatically.",
+      "Mark a mission done only when the operator explicitly says it is finished. Prefer mission_id; otherwise match by title.",
     parameters: {
       type: "object",
       properties: {
@@ -192,7 +170,7 @@ export const AI_FUNCTIONS = [
         days: {
           type: "number",
           description:
-            "How many days ahead to look, starting today. Use 31 for the next month. Maximum 31.",
+            "How many days ahead to look, starting today. The last day is included in full, so 31 includes events 31 days from today. Maximum 31.",
         },
         query: { type: "string", description: "Optional search text." },
       },
@@ -202,14 +180,15 @@ export const AI_FUNCTIONS = [
   {
     name: "create_calendar_event",
     description:
-      "Create a Google Calendar event when the operator asks for a calendar event or a reminder, including a lecture, class, lab, seminar, exam sitting, appointment, or meeting. Also call create_mission for that same obligation. start must be local ISO datetime YYYY-MM-DDTHH:mm:ss or YYYY-MM-DD for all-day.",
+      "Create a Google Calendar event when the operator asks for a calendar event or a reminder, including a lecture, class, lab, seminar, exam sitting, appointment, or meeting. If they did not give a starting hour, pass start as YYYY-MM-DD so the event is all day. Do not invent a clock time. If they gave an hour, start is a local ISO datetime YYYY-MM-DDTHH:mm:ss. If the result has duplicate true, nothing was created: say the message aloud and do not claim a new event was added.",
     parameters: {
       type: "object",
       properties: {
         title: { type: "string" },
         start: {
           type: "string",
-          description: "Local ISO datetime such as 2026-09-17T10:50:00",
+          description:
+            "YYYY-MM-DD when no starting hour was given, so the event is all day. YYYY-MM-DDTHH:mm:ss only when they named an hour.",
         },
         end: { type: "string" },
         duration_minutes: { type: "number", description: "Default 60 if end is omitted." },
@@ -337,8 +316,7 @@ function serializeTask(task: Task) {
     priority: task.priority,
     kind: task.kind ? missionKindLabel(task.kind) : "",
     course: task.course ?? "",
-    due: task.dueAt ? formatWhen(task.dueAt) : "unscheduled",
-    repeat: repeatLabel(task.repeat) || "none",
+    due: task.dueAt ? formatMissionDue(task.dueAt) : "unscheduled",
     tags: task.tags,
     notes: task.notes ?? "",
     icon: look.icon,
@@ -350,13 +328,18 @@ function asPriority(value: unknown): TaskPriority {
   return value === "low" || value === "high" ? value : "medium";
 }
 
+function calendarStart(start: string, operatorText: string) {
+  const trimmed = start.trim();
+  if (!operatorText.trim() || specifiesStartHour(operatorText)) return trimmed;
+  const day = trimmed.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : trimmed;
+}
+
 function missionFields(args: Record<string, unknown>) {
   const kind = parseMissionKind(args.kind);
-  const repeat = parseRepeatArg(args.repeat);
   return {
     kind,
     course: typeof args.course === "string" ? args.course : undefined,
-    repeat,
     notes: typeof args.notes === "string" ? args.notes : undefined,
     tags: Array.isArray(args.tags) ? args.tags.map(String) : undefined,
     icon: typeof args.icon === "string" ? args.icon : undefined,
@@ -452,7 +435,7 @@ export async function executeFunctions(
         });
       } else if (call.name === "create_mission") {
         const fields = missionFields(args);
-        const dueAt = typeof args.due_at === "string" ? parseWhen(args.due_at) : undefined;
+        const dueAt = typeof args.due_at === "string" ? parseDueAt(args.due_at) : undefined;
         if (typeof args.due_at === "string" && args.due_at.trim() && dueAt == null) {
           results.push({ name: call.name, result: { error: "Invalid due_at" } });
           continue;
@@ -467,7 +450,6 @@ export async function executeFunctions(
           color: fields.color,
           kind: fields.kind,
           course: fields.course,
-          repeat: fields.repeat,
         });
         results.push({ name: call.name, result: { ok: true, task: serializeTask(task) } });
       } else if (call.name === "update_mission") {
@@ -481,7 +463,7 @@ export async function executeFunctions(
           continue;
         }
         const fields = missionFields(args);
-        if (typeof args.due_at === "string" && args.due_at.trim() && parseWhen(args.due_at) == null) {
+        if (typeof args.due_at === "string" && args.due_at.trim() && parseDueAt(args.due_at) == null) {
           results.push({ name: call.name, result: { error: "Invalid due_at" } });
           continue;
         }
@@ -500,7 +482,6 @@ export async function executeFunctions(
           color: fields.color,
           kind: fields.kind,
           course: fields.course,
-          repeat: fields.repeat,
         });
         results.push({ name: call.name, result: { ok: true, task: serializeTask(task) } });
       } else if (call.name === "complete_mission") {
@@ -516,11 +497,7 @@ export async function executeFunctions(
         const completed = await store.completeTask(userId, found.id);
         results.push({
           name: call.name,
-          result: {
-            ok: true,
-            task: serializeTask(completed.task),
-            next: completed.next ? serializeTask(completed.next) : null,
-          },
+          result: { ok: true, task: serializeTask(completed.task) },
         });
       } else if (call.name === "delete_mission") {
         const found = await findTask(
@@ -581,15 +558,16 @@ export async function executeFunctions(
           results.push({ name: call.name, result: { error: "note_id or query is required" } });
         }
       } else if (call.name === "list_calendar_events") {
+        const rawDays = Number(args.days);
         const events = await listCalendarEvents(userId, {
-          days: typeof args.days === "number" ? args.days : undefined,
+          days: Number.isFinite(rawDays) ? rawDays : undefined,
           query: typeof args.query === "string" ? args.query : undefined,
         });
         results.push({ name: call.name, result: { count: events.length, events } });
       } else if (call.name === "create_calendar_event") {
         const event = await createCalendarEvent(userId, {
           title: String(args.title ?? ""),
-          start: String(args.start ?? ""),
+          start: calendarStart(String(args.start ?? ""), operatorText),
           end: typeof args.end === "string" ? args.end : undefined,
           duration_minutes:
             typeof args.duration_minutes === "number" ? args.duration_minutes : undefined,
@@ -598,7 +576,20 @@ export async function executeFunctions(
           reminder_minutes:
             typeof args.reminder_minutes === "number" ? args.reminder_minutes : undefined,
         });
-        results.push({ name: call.name, result: { ok: true, event } });
+        if ("duplicate" in event && event.duplicate) {
+          results.push({
+            name: call.name,
+            result: {
+              ok: true,
+              created: false,
+              duplicate: true,
+              message: event.message,
+              existing: event.existing,
+            },
+          });
+        } else {
+          results.push({ name: call.name, result: { ok: true, event } });
+        }
       } else if (call.name === "list_emails") {
         const emails = await listEmails(userId, {
           query: typeof args.query === "string" ? args.query : undefined,

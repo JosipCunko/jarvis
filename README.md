@@ -10,7 +10,7 @@ Talk in the **Talk to JARVIS** bar (or use Quick Commands / sidebar prompts). Wi
 
 ### Missions
 
-A mission is one piece of work for the signed-in operator: an assignment, study block, reading, project, or errand. It can name a course, a due date, a priority, notes, and tags. A lecture, class, lab, or exam sitting goes on Google Calendar, not this board. Say you want it as a mission, or pick **Recurring class or lab**, when you want that class on the board. Homework and study for the course stay missions.
+A mission is one piece of work for the signed-in operator: an assignment, study block, reading, project, or errand. It can name a course, a due date, a priority, notes, and tags. A lecture, class, lab, or exam sitting goes on Google Calendar, not this board. Say you want it as a mission, or pick **Class or lab**, when you want that class on the board. Homework and study for the course stay missions. Missions do not repeat.
 
 JARVIS creates and updates the plan. You read the same list, and you complete or delete from the board. You can also tell him a mission is finished ("I finished the essay", "gotov esej") and he will mark that one done. He cannot delete one.
 
@@ -19,12 +19,12 @@ JARVIS creates and updates the plan. You read the same list, and you complete or
 Ask him in the Talk bar in any of three ways:
 
 - Name the work and when it is due, and he creates it. A sentence of several obligations ("today I have to go to the gym and do the shopping", or the Croatian equivalent) becomes one mission each.
-- Say only that you want a new mission, and he shows a card of options: assignment, exam and a study plan, recurring class or lab, study block, reading, project, a today or tomorrow list, or an errand. Pick one and he asks only for what is still missing.
-- Ask him to plan a week or prepare for an exam that is still ahead. He proposes the set, including which sessions repeat, and creates them after you confirm.
+- Say only that you want a new mission, and he shows a card of options: assignment, exam and a study plan, class or lab, study block, reading, project, a today or tomorrow list, or an errand. Pick one and he asks only for what is still missing.
+- Ask him to plan a week or prepare for an exam that is still ahead. He proposes the set and creates those missions after you confirm.
 
-He picks an icon and color from `app/_lib/task-appearance.ts` when he creates one. You can ask him to rename, move a due date, change the course, or stop a repeat.
+He picks an icon and color from `app/_lib/task-appearance.ts` when he creates one. You can ask him to rename, move a due date, or change the course.
 
-A mission can repeat daily, on weekdays, or weekly on chosen days, until an optional end date. Completing it closes that occurrence and opens the next one after today, so a late complete does not pile up the days you missed. If the repeat has already ended, nothing new is added. Deleting the open card stops the series. Older completed cards stay until you delete them too.
+A due date with no clock time is stored as 23:59 that day. The mission card shows the date only.
 
 The HUD also shows system status and a live intelligence feed of overdue and due-soon missions. Asking what to do loads the same briefing: overdue, due today, and in progress.
 
@@ -116,4 +116,4 @@ Spoken replies now use OpenRouter's Grok voice model, with the voice Rex, and th
 
 The text response and the spoken reply are the same Thesys reply, not two answers. The screen renders the full text response, including titles and bullets. Voice reads the explanation.
 
-`speakableReply` in `app/_lib/c1.ts` keeps the lead-in prose, every sentence in `Text`, and `ListItem` facts such as a mission name and its due date. It drops `CardHeader` titles and subtitles, bullet marks, and props such as icon and color. List items are joined with a pause, so a mission list is heard as "Teretana. Due 22 September." A long reply is cut at a sentence boundary near 4000 characters. That string goes to `/api/speech/speak`. OpenRouter reads it with Grok voice (Rex). An OpenAI key uses `gpt-4o-mini-tts` (Onyx) instead. The speech model does not write its own reply.
+`speakableReply` in `app/_lib/c1.ts` keeps the lead-in prose, every sentence in `Text`, and `ListItem` facts such as a mission name and its due date. It drops `CardHeader` titles and subtitles, bullet marks, and props such as icon and color. Follow-up button questions are read at the end; button labels and source links are not. List items are joined with a pause, so a mission list is heard as "Teretana. Due 22 September." A long reply is cut at a sentence boundary near 4000 characters. That string goes to `/api/speech/speak`. OpenRouter reads it with Grok voice (Rex). An OpenAI key uses `gpt-4o-mini-tts` (Onyx) instead. The speech model does not write its own reply.

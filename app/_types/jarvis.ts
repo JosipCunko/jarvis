@@ -8,15 +8,7 @@ export type MissionKind =
   | "reading"
   | "project"
   | "errand";
-export type RepeatFrequency = "daily" | "weekly" | "weekdays";
 export type AuthProvider = "firebase" | "demo";
-
-export interface MissionRepeat {
-  frequency: RepeatFrequency;
-  interval: number;
-  weekdays?: number[];
-  until?: number;
-}
 
 export interface AppUser {
   uid: string;
@@ -42,8 +34,6 @@ export interface Task {
   color?: string;
   kind?: MissionKind;
   course?: string;
-  repeat?: MissionRepeat;
-  seriesId?: string;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
@@ -66,8 +56,6 @@ export interface TaskInput {
   color?: string;
   kind?: MissionKind | null;
   course?: string | null;
-  repeat?: MissionRepeat | null;
-  seriesId?: string;
 }
 
 export interface TaskFilter {
@@ -150,6 +138,7 @@ export interface MissionStore {
   updateMemory(userId: string, id: string, patch: MemoryPatch): Promise<MemoryNote>;
   recall(userId: string, query?: string): Promise<MemoryNote[]>;
   listMemories(userId: string): Promise<MemoryNote[]>;
+  listAllMemories(): Promise<MemoryNote[]>;
   forgetMemory(userId: string, id: string): Promise<void>;
   forgetStaleMemories(userId: string, olderThan: number): Promise<number>;
   listChats(userId: string): Promise<Pick<ChatThread, "id" | "title" | "updatedAt">[]>;

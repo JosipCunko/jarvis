@@ -111,9 +111,6 @@ export default function LoginForm({
         <h1 className="mt-3 font-display text-3xl tracking-wide text-cyan hud-glow">
           {resetting ? "Reset password" : isSignUp ? "Create operator" : "Authenticate"}
         </h1>
-        <p className="mt-2 text-sm text-muted">
-          Sign in to the command center. Firebase email/password, or demo mode.
-        </p>
 
         {firebaseReady && resetting ? (
           <form onSubmit={(event) => void onReset(event)} className="mt-8 grid gap-4">
@@ -153,7 +150,7 @@ export default function LoginForm({
             </button>
           </form>
         ) : firebaseReady ? (
-          <form onSubmit={onSubmit} className="mt-8 grid gap-4">
+          <form onSubmit={onSubmit} className="mt-6 grid gap-4">
             {isSignUp ? (
               <p className="text-sm text-muted">
                 Firebase emails a confirmation link. Sign-in stays closed until you open it.

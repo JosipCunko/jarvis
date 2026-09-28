@@ -535,8 +535,47 @@ function normalizeSpeech(value: string) {
     .trim();
 }
 
+function firstPersonOffer(value: string) {
+  const text = value.trim().replace(/\?+$/, "").trim();
+  const need = text.match(/^trebam li\s+(.+)$/i);
+  if (need) return `Trebaš li ${need[1]}?`;
+  const doI = text.match(/^do i need(?:\s+to)?\s+(.+)$/i);
+  if (doI) return `Do you need to ${doI[1]}?`;
+  return null;
+}
+
+function bareQuestion(value: string) {
+  return value
+    .trim()
+    .replace(/^[•●▪◦]\s+/, "")
+    .replace(/^[-*]\s+/, "")
+    .replace(/^\d+[.)]\s+/, "")
+    .trim();
+}
+
+function ctaOffer(value: string) {
+  const text = bareQuestion(value);
+  if ((text.match(/\?/g) ?? []).length !== 1) return value;
+  if (/[.!]/.test(text.slice(0, -1))) return value;
+  return offerFromHow(text) ?? firstPersonOffer(text) ?? value;
+}
+
+function spokenLines(value: string) {
+  const parts = value
+    .split(/\n+|(?<=\?)\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return [ctaOffer(value)];
+  const onlyQuestions = parts.every((part) => {
+    const text = bareQuestion(part);
+    return text.endsWith("?") && text.slice(0, -1).search(/[.!]/) === -1;
+  });
+  if (!onlyQuestions) return [value];
+  return parts.map(ctaOffer);
+}
+
 function pushSpoken(parts: string[], raw: string) {
-  const text = ensurePause(raw);
+  const text = ensurePause(ctaOffer(raw));
   const norm = normalizeSpeech(text);
   if (!norm) return;
   for (let i = 0; i < parts.length; i += 1) {
@@ -613,8 +652,100 @@ function isSentence(value: string) {
   return /[.!?…]/.test(value) || value.trim().length > 80;
 }
 
+function isQuestion(value: string) {
+  return value.trim().endsWith("?");
+}
+
+function isLinkButton(args: string[], tokens: string[]) {
+  if (tokens.includes("open_url")) return true;
+  return args.some((arg) => {
+    const text = arg.trim();
+    return text === "open_url" || /^https?:\/\//i.test(text);
+  });
+}
+
+function isClickInstruction(value: string) {
+  if (/\b(ask me|pitaj me)\b/i.test(value)) return true;
+  return (value.match(/[.!?…]/g) ?? []).length >= 2;
+}
+
+function lowerFirst(value: string) {
+  return value.charAt(0).toLocaleLowerCase("hr") + value.slice(1);
+}
+
+function offerFromHow(value: string) {
+  const text = value.trim().replace(/\?+$/, "").trim();
+  const kako = text.match(/^kako(?:\s+da)?\s+(.+)$/i);
+  if (kako) return `Trebaš li pomoć ${kako[1]}?`;
+  const howTo = text.match(/^how(?:\s+do\s+i|\s+can\s+i|\s+to)\s+(.+)$/i);
+  if (howTo) return `Do you want help to ${howTo[1]}?`;
+  const how = text.match(/^how\s+(.+)$/i);
+  if (how) return `Do you want help ${how[1]}?`;
+  return null;
+}
+
+function isCroatianLabel(value: string) {
+  return (
+    /[čćžšđČĆŽŠĐ]/.test(value) ||
+    /\b(pomozi|želim|započni|dodaj|kreiraj|krenuti|odabrati|učenj)\b/i.test(value)
+  );
+}
+
+function croatianQuestion(label: string) {
+  const helpWith = label.match(/^pomozi mi s\s+(.+)$/i);
+  if (helpWith) return `Trebaš li pomoć s ${helpWith[1]}?`;
+  const help = label.match(/^pomozi mi\s+(.+)$/i);
+  if (help) return `Trebaš li pomoć ${help[1]}?`;
+  const want = label.match(/^želim\s+(.+)$/i);
+  if (want) return `Želiš li ${want[1]}?`;
+  const start = label.match(/^započni\s+(.+)$/i);
+  if (start) return `Želiš li da započnem ${start[1]}?`;
+  const add = label.match(/^dodaj\s+(.+)$/i);
+  if (add) return `Želiš li da dodam ${add[1]}?`;
+  const create = label.match(/^kreiraj\s+(.+)$/i);
+  if (create) return `Želiš li da kreiram ${create[1]}?`;
+  return `Želiš li ${lowerFirst(label)}?`;
+}
+
+function englishQuestion(label: string) {
+  const helpWith = label.match(/^help me with\s+(?:a |an |the )?(.+)$/i);
+  if (helpWith) return `Do you want help with ${helpWith[1]}?`;
+  const help = label.match(/^help me\s+(.+)$/i);
+  if (help) return `Do you want help ${help[1]}?`;
+  const mission = label.match(/^create (?:a |an )?(?:new )?mission for\s+(.+)$/i);
+  if (mission) return `Should I add a new mission for ${mission[1]}?`;
+  const start = label.match(/^(?:start|starting)\s+(?:a |an |the )?(.+)$/i);
+  if (start) return `Do you want help with starting ${start[1]}?`;
+  const create = label.match(/^create\s+(.+)$/i);
+  if (create) return `Should I create ${create[1]}?`;
+  const want = label.match(/^i want to\s+(.+)$/i);
+  if (want) return `Do you want to ${want[1]}?`;
+  return `Should I ${lowerFirst(label)}?`;
+}
+
+function labelToQuestion(label: string) {
+  const text = label.trim().replace(/[.?]+$/, "");
+  if (text.split(/\s+/).length < 2) return null;
+  return offerFromHow(text) ?? (isCroatianLabel(text) ? croatianQuestion(text) : englishQuestion(text));
+}
+
+function buttonQuestions(args: string[], tokens: string[]) {
+  if (isLinkButton(args, tokens)) return [];
+  const explicit = args
+    .filter((arg) => isSpokenPhrase(arg) && isQuestion(arg))
+    .map((arg) => offerFromHow(arg) ?? arg);
+  if (explicit.length) return explicit;
+  if (args.some(isClickInstruction)) return [];
+  const label = args.find(
+    (arg) => isSpokenPhrase(arg) && arg.trim().split(/\s+/).length >= 2,
+  );
+  if (!label) return [];
+  const question = labelToQuestion(label);
+  return question ? [question] : [];
+}
+
 function stringsToSpeak(name: string, args: string[]) {
-  if (HEADING_COMPONENTS.has(name) || name === "CodeBlock") return [];
+  if (HEADING_COMPONENTS.has(name) || name === "CodeBlock" || name === "Button") return [];
   if (name === "TextContent" || name === "Text") {
     const text = args.find((arg) => isSpokenPhrase(arg));
     if (!text || text.includes("```") || isCodeSnippet(text)) return [];
@@ -627,9 +758,12 @@ function stringsToSpeak(name: string, args: string[]) {
   return args.filter((arg) => isSpokenPhrase(arg) && isSentence(arg));
 }
 
+const SPOKEN_QUESTION_LIMIT = 3;
+
 function spokenPieces(code: string) {
   const spoken: string[] = [];
-  const stack: { name: string; args: string[] }[] = [];
+  const questions: string[] = [];
+  const stack: { name: string; args: string[]; tokens: string[] }[] = [];
   let i = 0;
   while (i < code.length) {
     const ch = code[i];
@@ -639,7 +773,11 @@ function spokenPieces(code: string) {
     }
     if (ch === ")") {
       const frame = stack.pop();
-      if (frame) spoken.push(...stringsToSpeak(frame.name, frame.args));
+      if (frame?.name === "Button") {
+        questions.push(...buttonQuestions(frame.args, frame.tokens));
+      } else if (frame) {
+        spoken.push(...stringsToSpeak(frame.name, frame.args));
+      }
       i += 1;
       continue;
     }
@@ -648,10 +786,11 @@ function spokenPieces(code: string) {
       let j = i + ident[0].length;
       while (code[j] === " " || code[j] === "\n" || code[j] === "\t" || code[j] === "\r") j += 1;
       if (code[j] === "(") {
-        stack.push({ name: ident[0], args: [] });
+        stack.push({ name: ident[0], args: [], tokens: [] });
         i = j + 1;
         continue;
       }
+      stack[stack.length - 1]?.tokens.push(ident[0]);
       i = j;
       continue;
     }
@@ -663,15 +802,21 @@ function spokenPieces(code: string) {
     }
     i += 1;
   }
-  return spoken;
+  return { spoken, questions };
 }
 
 export function speakableReply(content: string) {
   const decoded = decodeEntities(content);
   const parts: string[] = [];
   const lead = leadingProse(decoded);
-  if (lead) pushSpoken(parts, lead);
-  for (const piece of spokenPieces(extractOpenUi(decoded))) pushSpoken(parts, piece);
+  if (lead) {
+    for (const line of spokenLines(lead)) pushSpoken(parts, line);
+  }
+  const { spoken, questions } = spokenPieces(extractOpenUi(decoded));
+  for (const piece of spoken) {
+    for (const line of spokenLines(piece)) pushSpoken(parts, line);
+  }
+  for (const question of questions.slice(0, SPOKEN_QUESTION_LIMIT)) pushSpoken(parts, question);
   return capSpeech(parts.join(" "));
 }
 

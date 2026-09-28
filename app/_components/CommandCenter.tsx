@@ -47,12 +47,12 @@ import { WeatherGlyph } from "@/app/_components/WeatherGlyph";
 import { WorkflowsView } from "@/app/_components/WorkflowsView";
 import { notifyError, notifyInfo, notifySuccess } from "@/app/_components/notify";
 import { looksLikeGenUi, readableFromGenUi, speakableReply, stoppedReplyText } from "@/app/_lib/c1";
-import { NEW_MISSION_PROMPT, missionKindLabel, repeatLabel } from "@/app/_lib/mission-repeat";
+import { NEW_MISSION_PROMPT, missionKindLabel } from "@/app/_lib/utils";
 import { signOut } from "@/app/_lib/auth-client";
 import { cn } from "@/app/_lib/cn";
 import { useLocalWeather } from "@/app/_lib/use-local-weather";
 import { useVoiceSession } from "@/app/_lib/use-voice-session";
-import { endOfToday, formatClock, formatDateLabel, formatWhen, startOfToday } from "@/app/_lib/time";
+import { endOfToday, formatClock, formatDateLabel, formatMissionDue, startOfToday } from "@/app/_lib/time";
 import {
   isDailyPromptBlocked,
   MAX_ATTACHMENT_BYTES,
@@ -1173,17 +1173,18 @@ export default function CommandCenter({
           ref={mainRef}
           className={cn(
             "hud-grid min-h-0 flex-1 p-3 lg:p-4",
-            focusMode &&
-            activeNav !== "settings" &&
-            activeNav !== "core" &&
-            activeNav !== "agents" &&
-            activeNav !== "tasks" &&
-            activeNav !== "memory" &&
-            activeNav !== "conversations" &&
-            activeNav !== "tools" &&
-            activeNav !== "workflows"
-              ? "flex flex-col overflow-hidden pb-0 lg:pb-0"
-              : "overflow-y-auto",
+            activeNav === "memory"
+              ? "flex flex-col overflow-hidden"
+              : focusMode &&
+                  activeNav !== "settings" &&
+                  activeNav !== "core" &&
+                  activeNav !== "agents" &&
+                  activeNav !== "tasks" &&
+                  activeNav !== "conversations" &&
+                  activeNav !== "tools" &&
+                  activeNav !== "workflows"
+                ? "flex flex-col overflow-hidden pb-0 lg:pb-0"
+                : "overflow-y-auto",
           )}
         >
           {activeNav === "tools" ? (
@@ -1816,7 +1817,7 @@ function IntelligenceFeed({
     ...dueSoon.slice(0, 3).map((task) => ({
       tone: "amber" as const,
       label: "Due",
-      text: `${task.title}${task.dueAt ? ` · ${formatWhen(task.dueAt)}` : ""}`,
+      text: `${task.title}${task.dueAt ? ` · ${formatMissionDue(task.dueAt)}` : ""}`,
     })),
   ];
   return (
@@ -2068,7 +2069,7 @@ function TimelineItem({
   onDelete: () => void;
 }) {
   const overdue = task.status !== "done" && task.dueAt != null && task.dueAt < startOfToday();
-  const detail = [missionKindLabel(task.kind), task.course, repeatLabel(task.repeat)]
+  const detail = [missionKindLabel(task.kind), task.course]
     .filter(Boolean)
     .join(" · ");
   return (
@@ -2085,7 +2086,7 @@ function TimelineItem({
           )}
         >
           {task.status === "done" ? "complete" : task.status.replace("_", " ")}
-          {task.dueAt ? ` · ${formatWhen(task.dueAt)}` : ""}
+          {task.dueAt ? ` · ${formatMissionDue(task.dueAt)}` : ""}
           {detail ? ` · ${detail}` : ""}
         </p>
       </div>
