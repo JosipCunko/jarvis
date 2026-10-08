@@ -240,7 +240,7 @@ export function AiCoreView({
 
   return (
     <motion.div
-      className="mx-auto grid max-w-[1600px] gap-3"
+      className="mx-auto grid max-w-[1600px] grid-cols-1 gap-3"
       initial={reduceMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={fade}
@@ -287,7 +287,7 @@ export function AiCoreView({
         </div>
       </Frame>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Frame tone={credits?.low ? "amber" : "cyan"}>
           <div className="flex items-start justify-between gap-3">
             <Glyph icon={Wallet} tone={credits?.low ? "amber" : "cyan"} />

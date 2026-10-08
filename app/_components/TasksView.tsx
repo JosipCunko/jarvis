@@ -93,7 +93,7 @@ export function TasksView({
   }
 
   return (
-    <div className="mx-auto grid max-w-[1600px] gap-3">
+    <div className="mx-auto grid max-w-[1600px] grid-cols-1 gap-3">
       <section className="hud-panel rounded-xl p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -115,7 +115,7 @@ export function TasksView({
           </Button>
         </div>
 
-        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
           <Stat label="Active" value={activeCount} tone="cyan" />
           <Stat label="Overdue" value={overdue} tone={overdue ? "danger" : "muted"} />
           <Stat label="Completed" value={doneCount} tone="ok" />
@@ -164,7 +164,7 @@ export function TasksView({
           </p>
         </section>
       ) : filter === "all" ? (
-        <div className="grid gap-3 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <MissionColumn
             title="PENDING"
             count={filtered.active.length}
@@ -234,7 +234,7 @@ function MissionColumn({
       {tasks.length === 0 ? (
         <p className="text-sm text-muted">{empty}</p>
       ) : (
-        <div className={cn("grid items-start gap-3", spread && "md:grid-cols-2")}>
+        <div className={cn("grid grid-cols-1 items-start gap-3", spread && "md:grid-cols-2")}>
           {tasks.map((task) => (
             <TaskCard
               key={task.id}

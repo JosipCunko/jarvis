@@ -83,7 +83,7 @@ export function Button({
   ...props
 }: ButtonProps) {
   const classNames = cn(
-    "hud-btn inline-flex items-center justify-center rounded-full border font-medium select-none",
+    "hud-btn relative inline-flex items-center justify-center rounded-full border font-medium select-none",
     "transition-[scale,translate,background-color,border-color,color,box-shadow] duration-200 ease-out",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/45",
     "disabled:pointer-events-none disabled:opacity-50",

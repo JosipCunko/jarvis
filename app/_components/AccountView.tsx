@@ -102,7 +102,7 @@ export function AccountView({
   }
 
   return (
-    <div className="mx-auto grid max-w-[1600px] gap-3 xl:grid-cols-2">
+    <div className="mx-auto grid max-w-[1600px] grid-cols-1 gap-3 xl:grid-cols-2">
       <section className="hud-panel rounded-xl p-4">
         <h2 className="font-mono text-[10px] tracking-[0.28em] text-muted">ACCOUNT</h2>
         <p className="mt-1 text-sm text-ink/90">Operator identity</p>
@@ -126,7 +126,7 @@ export function AccountView({
             Email
             <input className={fieldClass} value={email || "—"} readOnly disabled />
           </label>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <p className="text-xs tracking-widest text-muted uppercase">Provider</p>
               <p className="mt-1 text-sm">{demo ? "Demo" : "Firebase"}</p>

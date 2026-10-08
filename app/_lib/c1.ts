@@ -1,3 +1,4 @@
+import { languageOf } from "@/app/_lib/speech-lang";
 import { SPEECH_LIMIT } from "@/app/_lib/utils";
 
 const FENCE_RE = /```(?:openui-lang|openui)?\s*\n?([\s\S]*?)```/g;
@@ -817,7 +818,15 @@ export function speakableReply(content: string) {
     for (const line of spokenLines(piece)) pushSpoken(parts, line);
   }
   for (const question of questions.slice(0, SPOKEN_QUESTION_LIMIT)) pushSpoken(parts, question);
-  return capSpeech(parts.join(" "));
+  return croatianAddress(capSpeech(parts.join(" ")));
+}
+
+/** "Sir" is cheese in Croatian, so the English address is read as "gospodine". */
+function croatianAddress(text: string) {
+  if (languageOf(text) !== "hr") return text;
+  return text
+    .replace(/(^|[.!?]\s+)Sir,/g, "$1Gospodine,")
+    .replace(/,\s*sir(?=\s*[.!?]|\s*$)/gi, ", gospodine");
 }
 
 export function readableFromGenUi(content: string) {

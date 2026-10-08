@@ -113,11 +113,11 @@ const TOOLS: { name: string; detail: string; icon: LucideIcon }[] = [
 
 export function ToolsView() {
   return (
-    <div className="mx-auto grid max-w-[1600px] gap-3">
+    <div className="mx-auto grid max-w-[1600px] grid-cols-1 gap-3">
       <h1 className="font-display text-2xl tracking-[0.18em] text-cyan hud-glow sm:tracking-[0.22em]">
         Tools & Skills
       </h1>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {TOOLS.map((tool) => {
           const Icon = tool.icon;
           return (

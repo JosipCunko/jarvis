@@ -124,7 +124,7 @@ export function ConversationsView({
   }
 
   return (
-    <div className="mx-auto grid max-w-[1600px] gap-3">
+    <div className="mx-auto grid max-w-[1600px] grid-cols-1 gap-3">
       <section className="hud-panel rounded-xl p-4">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>

@@ -1,5 +1,6 @@
 import "server-only";
 import fs from "fs/promises";
+import os from "os";
 import path from "path";
 import QRCode from "qrcode";
 import makeWASocket, {
@@ -100,9 +101,18 @@ function sessions() {
   return globalStore.__jarvisWhatsApp;
 }
 
+function sessionRoot() {
+  if (process.env.WHATSAPP_DATA_DIR) return process.env.WHATSAPP_DATA_DIR;
+  // Serverless bundles are read-only; only the OS temp dir is writable there.
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join(os.tmpdir(), "jarvis-whatsapp");
+  }
+  return path.join(process.cwd(), ".data", "whatsapp");
+}
+
 function sessionDir(userId: string) {
   const safe = userId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80) || "operator";
-  return path.join(process.cwd(), ".data", "whatsapp", safe);
+  return path.join(sessionRoot(), safe);
 }
 
 function sessionFor(userId: string) {

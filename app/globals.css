@@ -39,6 +39,7 @@ body {
   background: var(--hud);
   color: var(--ink);
   color-scheme: dark;
+  overflow-x: clip;
 }
 
 body {
@@ -136,6 +137,24 @@ svg.lucide {
   font-family: var(--font-geist-sans), sans-serif;
 }
 
+/* chatAssistantResponseBg is transparent, and C1 reuses that token for portaled popovers. */
+body [class*="openui-theme-portal-"] {
+  --openui-foreground: var(--panel);
+}
+
+body > [class*="openui-theme-portal-"],
+body > [class*="crayon-theme-portal-"],
+.openui-date-picker-renderer-floating-content,
+.crayon-date-picker-renderer-floating-content {
+  z-index: 1000;
+}
+
+.openui-date-picker-renderer-floating-menu,
+.crayon-date-picker-renderer-floating-menu {
+  max-width: calc(100vw - 16px);
+  background: var(--panel);
+}
+
 @keyframes jarvis-toast-in {
   from {
     opacity: 0;
@@ -219,7 +238,6 @@ svg.lucide {
 }
 
 .hud-btn {
-  position: relative;
   isolation: isolate;
 }
 

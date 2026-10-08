@@ -64,12 +64,12 @@ export function WorkflowsView({
         : `${whatsappUnread} unread messages`;
 
   return (
-    <div className="mx-auto grid max-w-[1600px] gap-3">
+    <div className="mx-auto grid max-w-[1600px] grid-cols-1 gap-3">
       {error ? (
         <section className="hud-panel rounded-xl p-4 text-sm text-danger">{error}</section>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2 md:items-start">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:items-start">
         <section className="hud-panel rounded-xl p-4">
           <h2 className="truncate font-mono text-[10px] tracking-[0.28em] text-muted">
             {weather?.place || "WEATHER"}
@@ -101,7 +101,7 @@ export function WorkflowsView({
           ) : null}
         </section>
 
-        <div className="grid gap-3">
+        <div className="grid grid-cols-1 gap-3">
         <section className="hud-panel rounded-xl p-4">
           <h2 className="flex items-center gap-2 font-mono text-[10px] tracking-[0.28em] text-muted">
             <Mail size={12} aria-hidden />
@@ -236,7 +236,7 @@ export function WorkflowsView({
           </div>
         ) : null}
         {briefing?.events.length ? (
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
             {briefing.events.map((event) => (
               <EventCard
                 key={event.id}

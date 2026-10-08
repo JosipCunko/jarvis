@@ -323,6 +323,15 @@ function setStoredFocus(next: boolean) {
   focusListeners.forEach((listener) => listener());
 }
 
+const COMPOSER_MAX_HEIGHT = 160;
+
+function fitComposerField(node: HTMLTextAreaElement | null) {
+  if (!node) return;
+  node.style.height = "auto";
+  const next = Math.min(node.scrollHeight, COMPOSER_MAX_HEIGHT);
+  node.style.height = `${next}px`;
+}
+
 export default function CommandCenter({
   operatorName,
   initialSnapshot,
@@ -366,7 +375,7 @@ export default function CommandCenter({
   const mainRef = useRef<HTMLElement | null>(null);
   const [chatCue, setChatCue] = useState(false);
   const [chatReveal, setChatReveal] = useState(0);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [googleEmail, setGoogleEmail] = useState(initialGoogleEmail);
@@ -1018,6 +1027,18 @@ export default function CommandCenter({
     router.refresh();
   }
 
+  useLayoutEffect(() => {
+    fitComposerField(inputRef.current);
+  }, [input]);
+
+  const composerStatus = listening
+    ? "LISTENING"
+    : speaking
+      ? "SPEAKING"
+      : voiceChat
+        ? "VOICE CHAT"
+        : "TALK TO JARVIS";
+
   const sidebarSpring = reduceMotion
     ? { duration: 0 }
     : { type: "spring" as const, stiffness: 380, damping: 34 };
@@ -1047,14 +1068,14 @@ export default function CommandCenter({
         <SidebarPanel {...sidebarProps} />
       </aside>
 
-      <div className="lg:hidden">
+      <div className="pointer-events-none fixed inset-0 z-40 lg:hidden">
         <Button
           size="sm"
           aria-label="Open sidebar"
           aria-expanded={sidebarOpen}
           aria-controls={sidebarId}
           onClick={() => setSidebarOpen(true)}
-          className="fixed top-3 left-3 z-40"
+          className="pointer-events-auto fixed top-3 left-3 z-40"
         >
           <Menu size={16} />
         </Button>
@@ -1065,7 +1086,7 @@ export default function CommandCenter({
               key="sidebar-backdrop"
               type="button"
               aria-label="Close sidebar"
-              className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[2px]"
+              className="pointer-events-auto fixed inset-0 z-40 bg-black/55 backdrop-blur-[2px]"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -1087,7 +1108,7 @@ export default function CommandCenter({
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
               transition={sidebarSpring}
-              className="fixed inset-y-0 left-0 z-50 flex h-svh w-60 flex-col overflow-hidden border-r border-cyan/30 bg-hud-2 shadow-[12px_0_48px_rgba(0,212,255,0.16)]"
+              className="pointer-events-auto fixed inset-y-0 left-0 z-50 flex h-svh w-60 flex-col overflow-hidden border-r border-cyan/30 bg-hud-2 shadow-[12px_0_48px_rgba(0,212,255,0.16)]"
             >
               <SidebarPanel {...sidebarProps} animated showClose onClose={closeSidebar} />
             </motion.aside>
@@ -1184,7 +1205,7 @@ export default function CommandCenter({
                   activeNav !== "tools" &&
                   activeNav !== "workflows"
                 ? "flex flex-col overflow-hidden pb-0 lg:pb-0"
-                : "overflow-y-auto",
+                : "overflow-x-hidden overflow-y-auto",
           )}
         >
           {activeNav === "tools" ? (
@@ -1294,7 +1315,7 @@ export default function CommandCenter({
               "mx-auto grid w-full max-w-[1600px] gap-3",
               focusMode
                 ? "min-h-0 flex-1 grid-cols-1 grid-rows-1"
-                : "xl:grid-cols-[16rem_minmax(0,1fr)_20rem]",
+                : "grid-cols-1 xl:grid-cols-[16rem_minmax(0,1fr)_20rem]",
             )}
           >
             {focusMode ? null : (
@@ -1338,15 +1359,15 @@ export default function CommandCenter({
           </div>
 
           {focusMode ? null : (
-          <div className="mx-auto mt-3 grid max-w-[1600px] gap-3 xl:grid-cols-[minmax(0,1.4fr)_20rem]">
-            <div className="grid gap-3">
+          <div className="mx-auto mt-3 grid max-w-[1600px] grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.4fr)_20rem]">
+            <div className="grid grid-cols-1 gap-3">
               <AgentsPanel searching={researching} />
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <SystemMonitor />
                 <MemoryPanel memories={snapshot.memories} />
               </div>
             </div>
-            <div className="grid gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <TimelinePanel
                 tasks={tasks}
                 onOpen={() => setActiveNav("tasks")}
@@ -1413,7 +1434,7 @@ export default function CommandCenter({
           <div
             className={cn(
               "mx-auto flex max-w-4xl flex-col gap-2 border border-cyan/40 bg-hud px-2 py-2 shadow-[0_0_28px_rgba(0,212,255,0.18)]",
-              attachments.length ? "rounded-3xl" : "rounded-full",
+              attachments.length ? "rounded-3xl" : "rounded-3xl md:rounded-full",
             )}
           >
             {attachments.length ? (
@@ -1444,97 +1465,123 @@ export default function CommandCenter({
                 ))}
               </div>
             ) : null}
-            <div className="flex items-center gap-3">
-            <Button
-              title={promptsBlocked ? "Daily prompt limit reached" : voiceLive ? "Stop listening" : "Speak a command"}
-              aria-label={voiceLive ? "Stop listening" : "Start listening"}
-              aria-pressed={voiceLive}
-              active={voiceLive}
-              disabled={promptsBlocked}
-              onClick={() => toggleListening(voiceChat ? "chat" : "command")}
-            >
-              <Mic size={18} className={voiceLive ? "animate-[jarvis-pulse_1.2s_ease-in-out_infinite]" : undefined} />
-            </Button>
-            <Button
-              shape="pill"
-              title={promptsBlocked ? "Daily prompt limit reached" : speakReplies ? "JARVIS microphone is on" : "JARVIS microphone is off"}
-              aria-label={speakReplies ? "Turn off the JARVIS microphone" : "Turn on the JARVIS microphone"}
-              aria-pressed={speakReplies}
-              active={speakReplies}
-              disabled={promptsBlocked}
-              onClick={() => {
-                if (speakReplies) {
-                  stopPlayback();
-                  setSpeaking(false);
-                }
-                setSpeakReplies((on) => !on);
-              }}
-            >
-              <BotMessageSquare size={16} />
-              <Mic size={11} aria-hidden />
-            </Button>
-            <div className="min-w-0 flex-1 text-center">
-              <p className="font-display text-[11px] tracking-[0.35em] text-cyan">
-                {listening ? "LISTENING" : speaking ? "SPEAKING" : voiceChat ? "VOICE CHAT" : "TALK TO JARVIS"}
-              </p>
-              <input
-                ref={inputRef}
-                value={input}
-                onChange={(event) => {
-                  dictationBaseRef.current = event.target.value;
-                  setInput(event.target.value);
-                }}
-                onPaste={onPaste}
-                placeholder={
-                  promptsBlocked
-                    ? "Daily prompt limit reached"
-                    : speaking
-                    ? "Speaking…"
-                    : pending || voicePhase === "transcribing"
-                      ? "Working…"
-                      : holding
-                        ? "Still listening…"
-                        : listening
-                          ? "Speak now…"
-                        : attachments.length
-                          ? "Add a message, then send…"
-                          : "I am listening…"
-                }
-                disabled={pending || promptsBlocked}
-                className="w-full bg-transparent text-center text-sm text-ink outline-none placeholder:text-muted disabled:opacity-60"
-              />
-            </div>
-            {chatId || messages.length ? (
-              <Button
-                title="New conversation"
-                aria-label="New conversation"
-                onClick={startNewConversation}
-              >
-                <Plus size={16} />
-              </Button>
-            ) : null}
-            <Button
-              title={promptsBlocked ? "Daily prompt limit reached" : "Attach image"}
-              aria-label="Attach image"
-              disabled={promptsBlocked}
-              onClick={() => fileRef.current?.click()}
-            >
-              <Paperclip size={16} />
-            </Button>
-            <Button
-              type={generating ? "button" : "submit"}
-              variant="solid"
-              aria-label={generating ? "Stop JARVIS" : "Send"}
-              title={generating ? "Stop" : promptsBlocked ? "Daily prompt limit reached" : "Talk to JARVIS"}
-              disabled={promptsBlocked && !generating}
-              onClick={generating ? stopGeneration : undefined}
-            >
-              {generating ? (
-                <span aria-hidden className="block size-3.5 bg-black" />
-              ) : (
-                <Play size={16} fill="currentColor" />
-              )}
-            </Button>
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 md:contents">
+                <div className="flex items-center gap-2 md:order-1">
+                  <Button
+                    size="sm"
+                    className="md:h-11 md:w-11"
+                    title={promptsBlocked ? "Daily prompt limit reached" : voiceLive ? "Stop listening" : "Speak a command"}
+                    aria-label={voiceLive ? "Stop listening" : "Start listening"}
+                    aria-pressed={voiceLive}
+                    active={voiceLive}
+                    disabled={promptsBlocked}
+                    onClick={() => toggleListening(voiceChat ? "chat" : "command")}
+                  >
+                    <Mic size={18} className={voiceLive ? "animate-[jarvis-pulse_1.2s_ease-in-out_infinite]" : undefined} />
+                  </Button>
+                  <Button
+                    shape="pill"
+                    size="sm"
+                    className="md:h-11 md:px-3.5"
+                    title={promptsBlocked ? "Daily prompt limit reached" : speakReplies ? "JARVIS microphone is on" : "JARVIS microphone is off"}
+                    aria-label={speakReplies ? "Turn off the JARVIS microphone" : "Turn on the JARVIS microphone"}
+                    aria-pressed={speakReplies}
+                    active={speakReplies}
+                    disabled={promptsBlocked}
+                    onClick={() => {
+                      if (speakReplies) {
+                        stopPlayback();
+                        setSpeaking(false);
+                      }
+                      setSpeakReplies((on) => !on);
+                    }}
+                  >
+                    <BotMessageSquare size={16} />
+                    <Mic size={11} aria-hidden />
+                  </Button>
+                </div>
+                <p className="min-w-0 px-1 text-center font-display text-[10px] leading-tight tracking-[0.18em] text-cyan sm:text-[11px] sm:tracking-[0.28em] md:hidden">
+                  {composerStatus}
+                </p>
+                <div className="flex items-center justify-end gap-2 md:order-3">
+                  {chatId || messages.length ? (
+                    <Button
+                      size="sm"
+                      className="md:h-11 md:w-11"
+                      title="New conversation"
+                      aria-label="New conversation"
+                      onClick={startNewConversation}
+                    >
+                      <Plus size={16} />
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    className="md:h-11 md:w-11"
+                    title={promptsBlocked ? "Daily prompt limit reached" : "Attach image"}
+                    aria-label="Attach image"
+                    disabled={promptsBlocked}
+                    onClick={() => fileRef.current?.click()}
+                  >
+                    <Paperclip size={16} />
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="md:h-11 md:w-11"
+                    type={generating ? "button" : "submit"}
+                    variant="solid"
+                    aria-label={generating ? "Stop JARVIS" : "Send"}
+                    title={generating ? "Stop" : promptsBlocked ? "Daily prompt limit reached" : "Talk to JARVIS"}
+                    disabled={promptsBlocked && !generating}
+                    onClick={generating ? stopGeneration : undefined}
+                  >
+                    {generating ? (
+                      <span aria-hidden className="block size-3.5 bg-black" />
+                    ) : (
+                      <Play size={16} fill="currentColor" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+              <div className="min-w-0 w-full md:order-2 md:w-auto md:min-w-48 md:flex-1">
+                <p className="mb-1 hidden text-center font-display text-[11px] tracking-[0.35em] text-cyan md:block">
+                  {composerStatus}
+                </p>
+                <textarea
+                  ref={inputRef}
+                  rows={2}
+                  value={input}
+                  onChange={(event) => {
+                    dictationBaseRef.current = event.target.value;
+                    setInput(event.target.value);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      event.currentTarget.form?.requestSubmit();
+                    }
+                  }}
+                  onPaste={onPaste}
+                  placeholder={
+                    promptsBlocked
+                      ? "Daily prompt limit reached"
+                      : speaking
+                      ? "Speaking…"
+                      : pending || voicePhase === "transcribing"
+                        ? "Working…"
+                        : holding
+                          ? "Still listening…"
+                          : listening
+                            ? "Speak now…"
+                          : attachments.length
+                            ? "Add a message, then send…"
+                            : "I am listening…"
+                  }
+                  disabled={pending || promptsBlocked}
+                  className="block max-h-40 min-h-12 w-full resize-none overflow-y-auto bg-transparent px-2 py-2 text-left text-sm leading-5 text-ink outline-none placeholder:text-muted disabled:opacity-60 md:px-1"
+                />
+              </div>
             </div>
           </div>
         </form>
@@ -1873,7 +1920,7 @@ function AgentsPanel({ searching }: { searching: boolean }) {
   );
   return (
     <Panel title="ACTIVE AGENTS" action={<span className="text-[10px] text-muted">View All</span>}>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {agents.map((agent) => (
           <div
             key={agent.name}
@@ -2113,7 +2160,7 @@ function QuickCommands({
 }) {
   return (
     <Panel title="QUICK COMMANDS">
-      <div className="grid gap-2">
+      <div className="grid grid-cols-1 gap-2">
         {QUICK.map((item) => {
           const live = item.label === "Start Voice Chat" && voiceChat;
           return (
@@ -2238,6 +2285,10 @@ function LinkStatus({
   }, [refreshWhatsApp, whatsapp.connected, whatsapp.qr]);
 
   async function connectWhatsApp() {
+    if (process.env.NODE_ENV !== "development") {
+      notifyInfo("WhatsApp connection is only available in local development");
+      return;
+    }
     setWhatsappBusy(true);
     try {
       const response = await fetch("/api/whatsapp/connect", { method: "POST" });

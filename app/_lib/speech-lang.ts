@@ -61,7 +61,7 @@ function foldCyrillic(text: string) {
   return out;
 }
 
-function languageOf(text: string): SpeechLanguage {
+export function languageOf(text: string): SpeechLanguage {
   return CROATIAN.test(text) ? "hr" : "en";
 }
 
